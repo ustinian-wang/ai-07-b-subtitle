@@ -1,0 +1,19 @@
+README.md
+  s_494438b44b9e5c::t_011f6196105e9c 12-15,17,21,26,32,34-36,40,43,47-49,51-61,68
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "f4445250b34551428a07845eec74d7addd659148",
+  "prompts": {},
+  "sessions": {
+    "s_494438b44b9e5c": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "72812374-9fa8-4ff5-909a-110ac9a87421",
+        "model": "default"
+      },
+      "human_author": "jser <87244899@qq.com>"
+    }
+  }
+}
