@@ -1,21 +1,61 @@
 <template>
-  <aside class="chat-panel" :style="{ width: `${width}px` }">
+  <aside
+    class="chat-panel"
+    :class="{ 'chat-panel--drop-target': dropActive }"
+    :style="{ width: `${width}px` }"
+    @dragenter="onDropZoneEnter"
+    @dragleave="onDropZoneLeave"
+    @dragover="onDropZoneDragOver"
+    @drop="onDropZoneDrop"
+  >
     <header class="chat-head">
-      <div>
+      <div class="chat-head-main">
         <h2 class="chat-title">对话助手</h2>
-        <p class="chat-sub">引用库内内容，像 ChatGPT 一样追问</p>
+        <p v-if="activeSessionTitle" class="chat-active-session" :title="activeSessionTitle">
+          {{ activeSessionTitle }}
+        </p>
+        <p v-else class="chat-sub">引用库内内容，像 ChatGPT 一样追问</p>
       </div>
       <div class="chat-head-actions">
-        <button type="button" class="btn tiny" :disabled="busy" @click="newThread">新对话</button>
-        <button type="button" class="btn tiny" :disabled="busy || !messages.length" @click="clearThread">
-          清空
+        <button
+          type="button"
+          class="btn tiny"
+          :class="{ 'btn--active': sessionsOpen }"
+          :disabled="busy"
+          @click="sessionsOpen = !sessionsOpen"
+        >
+          历史{{ sessions.length ? ` (${sessions.length})` : '' }}
         </button>
+        <button type="button" class="btn tiny" :disabled="busy" @click="newThread">新对话</button>
       </div>
     </header>
 
+    <div v-if="sessionsOpen" class="chat-sessions">
+      <p v-if="!sessions.length" class="chat-sessions-empty">暂无历史会话</p>
+      <div
+        v-for="s in sessions"
+        :key="s.thread_id"
+        :class="['chat-session-row', { active: s.thread_id === threadId }]"
+      >
+        <button type="button" class="chat-session-btn" :disabled="busy" @click="selectSession(s.thread_id)">
+          <span class="chat-session-title">{{ s.title || '新对话' }}</span>
+          <span class="chat-session-meta">{{ s.message_count }} 条 · {{ formatSessionTime(s.updated_at) }}</span>
+        </button>
+        <button
+          type="button"
+          class="chat-session-del"
+          title="删除会话"
+          :disabled="busy"
+          @click="deleteSession(s.thread_id)"
+        >
+          ×
+        </button>
+      </div>
+    </div>
+
     <div ref="scrollRef" class="chat-messages">
       <p v-if="!messages.length" class="chat-empty">
-        发送消息开始对话。可引用当前提取结果或左侧选中的记录作为上下文。
+        发送消息开始对话。可 @ 引用库内笔记、从左侧拖入笔记，或使用「引用当前 / 选中」按钮。
       </p>
       <article
         v-for="(m, idx) in messages"
@@ -49,24 +89,52 @@
         >
           引用选中 {{ selectedIds.length ? `(${selectedIds.length})` : '' }}
         </button>
+        <span class="chat-refs-hint">@ 引用 · 拖入笔记</span>
       </div>
+      <p v-if="refHint" class="chat-ref-toast">{{ refHint }}</p>
       <div v-if="refs.length" class="chat-ref-chips">
         <span v-for="r in refs" :key="r.id" class="chat-ref-chip">
-          {{ r.title || r.id }}
-          <button type="button" class="chip-x" @click="removeRef(r.id)">×</button>
+          <span
+            :class="['ref-source', r.source === 'xiaohongshu' ? 'ref-source--xhs' : 'ref-source--bili']"
+          >
+            {{ r.source === 'xiaohongshu' ? '小红书' : 'B站' }}
+          </span>
+          <span class="ref-title">{{ r.title || r.id }}</span>
+          <button type="button" class="chip-x" title="移除引用" @click="removeRef(r.id)">×</button>
         </span>
       </div>
     </div>
 
     <footer class="chat-composer">
-      <textarea
-        v-model="draft"
-        class="chat-input"
-        rows="3"
-        placeholder="输入问题… ⌘/Ctrl+Enter 发送"
-        :disabled="busy"
-        @keydown="onKeydown"
-      />
+      <div class="chat-input-wrap">
+        <textarea
+          ref="inputRef"
+          v-model="draft"
+          class="chat-input"
+          rows="3"
+          placeholder="输入问题，@ 引用笔记，或从左侧拖入… ⌘/Ctrl+Enter 发送"
+          :disabled="busy"
+          @input="onInput"
+          @keydown="onKeydown"
+        />
+        <ul v-if="mention.active && mentionItems.length" class="mention-popup">
+          <li
+            v-for="(rec, idx) in mentionItems"
+            :key="rec.id"
+            :class="['mention-item', { 'mention-item--active': idx === mention.index }]"
+            @mousedown.prevent="selectMention(rec)"
+          >
+            <span
+              :class="['ref-source', rec.source === 'xiaohongshu' ? 'ref-source--xhs' : 'ref-source--bili']"
+            >
+              {{ rec.source === 'xiaohongshu' ? '小红书' : 'B站' }}
+            </span>
+            <span class="mention-title">{{ mentionLabel(rec) }}</span>
+            <span class="mention-meta">{{ mentionMeta(rec) }}</span>
+          </li>
+        </ul>
+        <p v-else-if="mention.active && !mentionItems.length" class="mention-empty">无匹配笔记</p>
+      </div>
       <button type="button" class="btn primary chat-send" :disabled="busy || !draft.trim()" @click="send">
         {{ busy ? '生成中…' : '发送' }}
       </button>
@@ -77,6 +145,7 @@
 
 <script>
 const THREAD_KEY = 'b-subtitle-chat-thread';
+const DRAG_MIME = 'application/x-subtitle-ids';
 
 export default {
   name: 'ChatPanel',
@@ -86,10 +155,13 @@ export default {
     currentRecordTitle: { type: String, default: '' },
     selectedIds: { type: Array, default: () => [] },
     recordMap: { type: Object, default: () => ({}) },
+    allRecords: { type: Array, default: () => [] },
   },
   data() {
     return {
       threadId: '',
+      sessions: [],
+      sessionsOpen: false,
       messages: [],
       refs: [],
       draft: '',
@@ -97,35 +169,223 @@ export default {
       streaming: false,
       streamBuffer: '',
       chatError: '',
+      dropActive: false,
+      dropDepth: 0,
+      refHint: '',
+      mention: { active: false, query: '', start: 0, index: 0 },
     };
+  },
+  computed: {
+    activeSessionTitle() {
+      const cur = this.sessions.find((s) => s.thread_id === this.threadId);
+      return cur?.title || '';
+    },
+    mentionItems() {
+      if (!this.mention.active) return [];
+      const q = this.mention.query.toLowerCase();
+      const list = this.allRecords.length ? this.allRecords : Object.values(this.recordMap);
+      if (!q) return list.slice(0, 20);
+      return list.filter((r) => this.mentionMatch(r, q)).slice(0, 20);
+    },
   },
   mounted() {
     this.threadId = localStorage.getItem(THREAD_KEY) || '';
-    if (this.threadId) {
-      this.loadMessages();
-    } else {
-      this.ensureThread();
-    }
+    this.loadSessions().then(() => {
+      if (this.threadId) {
+        this.loadMessages();
+      } else if (this.sessions.length) {
+        this.selectSession(this.sessions[0].thread_id, false);
+      } else {
+        this.ensureThread();
+      }
+    });
+  },
+  beforeUnmount() {
+    clearTimeout(this._refHintTimer);
   },
   methods: {
     hasRef(id) {
       return this.refs.some((r) => r.id === id);
     },
-    addRef(id, title) {
-      if (!id || this.hasRef(id)) return;
-      this.refs.push({ id, title: title || id });
+    addRef(id, title, source) {
+      if (!id || this.hasRef(id)) return false;
+      const rec = this.recordMap[id];
+      this.refs.push({
+        id,
+        title: title || rec?.title || id,
+        source: source || rec?.source || 'bilibili',
+      });
+      return true;
+    },
+    addRefsFromIds(ids) {
+      let added = 0;
+      for (const id of ids) {
+        const rec = this.recordMap[id];
+        if (this.addRef(id, rec?.title, rec?.source)) added += 1;
+      }
+      if (added) this.showRefHint(`已引用 ${added} 条笔记`);
+      else if (ids.length) this.showRefHint('所选笔记已在引用中');
+    },
+    showRefHint(msg) {
+      this.refHint = msg;
+      clearTimeout(this._refHintTimer);
+      this._refHintTimer = setTimeout(() => {
+        this.refHint = '';
+      }, 2500);
     },
     removeRef(id) {
       this.refs = this.refs.filter((r) => r.id !== id);
     },
     attachCurrent() {
       if (!this.currentRecordId) return;
-      this.addRef(this.currentRecordId, this.currentRecordTitle);
+      if (this.addRef(this.currentRecordId, this.currentRecordTitle)) {
+        this.showRefHint('已引用当前笔记');
+      }
     },
     attachSelected() {
+      const before = this.refs.length;
       for (const id of this.selectedIds) {
         const rec = this.recordMap[id];
-        this.addRef(id, rec?.title || id);
+        this.addRef(id, rec?.title, rec?.source);
+      }
+      const added = this.refs.length - before;
+      if (added) this.showRefHint(`已引用 ${added} 条笔记`);
+    },
+    hasSubtitleDrag(e) {
+      return e.dataTransfer?.types?.includes(DRAG_MIME);
+    },
+    onDropZoneDragOver(e) {
+      if (!this.hasSubtitleDrag(e)) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'copy';
+    },
+    onDropZoneEnter(e) {
+      if (!this.hasSubtitleDrag(e)) return;
+      this.dropDepth += 1;
+      this.dropActive = true;
+    },
+    onDropZoneLeave(e) {
+      if (!this.hasSubtitleDrag(e)) return;
+      this.dropDepth -= 1;
+      if (this.dropDepth <= 0) {
+        this.dropDepth = 0;
+        this.dropActive = false;
+      }
+    },
+    onDropZoneDrop(e) {
+      e.preventDefault();
+      this.dropActive = false;
+      this.dropDepth = 0;
+      const raw = e.dataTransfer.getData(DRAG_MIME);
+      if (!raw) return;
+      try {
+        const parsed = JSON.parse(raw);
+        const ids = Array.isArray(parsed) ? parsed : [parsed];
+        this.addRefsFromIds(ids.filter(Boolean));
+      } catch {
+        /* ponytail: 非法拖拽数据直接忽略 */
+      }
+    },
+    mentionLabel(rec) {
+      return rec.title || rec.bvid || rec.note_id || rec.id;
+    },
+    mentionMeta(rec) {
+      if (rec.source === 'xiaohongshu') return rec.note_id || rec.id;
+      return rec.bvid ? `${rec.bvid} · P${rec.page || 1}` : rec.id;
+    },
+    mentionMatch(rec, q) {
+      const hay = [rec.title, rec.bvid, rec.note_id, rec.id].filter(Boolean).join(' ').toLowerCase();
+      return hay.includes(q);
+    },
+    closeMention() {
+      this.mention = { active: false, query: '', start: 0, index: 0 };
+    },
+    onInput(e) {
+      const ta = e.target;
+      const pos = ta.selectionStart;
+      const text = this.draft.slice(0, pos);
+      const atIdx = text.lastIndexOf('@');
+      if (atIdx === -1 || (atIdx > 0 && !/\s/.test(text[atIdx - 1]))) {
+        this.closeMention();
+        return;
+      }
+      const query = text.slice(atIdx + 1);
+      if (/\s/.test(query)) {
+        this.closeMention();
+        return;
+      }
+      this.mention = { active: true, query, start: atIdx, index: 0 };
+    },
+    selectMention(record) {
+      const ta = this.$refs.inputRef;
+      if (!ta) return;
+      const title = this.mentionLabel(record);
+      const insert = `@[${title}](${record.id})`;
+      const before = this.draft.slice(0, this.mention.start);
+      const after = this.draft.slice(ta.selectionStart);
+      this.draft = `${before}${insert} ${after}`;
+      this.addRef(record.id, title, record.source);
+      this.showRefHint(`已 @ 引用：${title}`);
+      this.closeMention();
+      this.$nextTick(() => {
+        const pos = before.length + insert.length + 1;
+        ta.focus();
+        ta.setSelectionRange(pos, pos);
+      });
+    },
+    formatSessionTime(iso) {
+      if (!iso) return '';
+      try {
+        const d = new Date(iso);
+        const now = new Date();
+        const diff = now - d;
+        if (diff < 60000) return '刚刚';
+        if (diff < 3600000) return `${Math.floor(diff / 60000)} 分钟前`;
+        if (diff < 86400000) return `${Math.floor(diff / 3600000)} 小时前`;
+        return d.toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+      } catch {
+        return '';
+      }
+    },
+    async loadSessions() {
+      try {
+        const resp = await fetch('/api/v1/chat/sessions');
+        const data = await resp.json();
+        if (resp.ok) {
+          this.sessions = data.sessions || [];
+        }
+      } catch {
+        this.sessions = [];
+      }
+    },
+    async selectSession(tid, closePanel = true) {
+      if (!tid || this.busy || tid === this.threadId) {
+        if (closePanel) this.sessionsOpen = false;
+        return;
+      }
+      this.threadId = tid;
+      localStorage.setItem(THREAD_KEY, tid);
+      this.refs = [];
+      this.chatError = '';
+      this.closeMention();
+      await this.loadMessages();
+      if (closePanel) this.sessionsOpen = false;
+    },
+    async deleteSession(tid) {
+      if (!tid || this.busy) return;
+      if (!window.confirm('删除该会话及全部聊天记录？')) return;
+      try {
+        await fetch(`/api/v1/chat/sessions/${encodeURIComponent(tid)}`, { method: 'DELETE' });
+        await this.loadSessions();
+        if (tid === this.threadId) {
+          if (this.sessions.length) {
+            await this.selectSession(this.sessions[0].thread_id, false);
+          } else {
+            await this.newThread();
+          }
+        }
+      } catch {
+        /* ignore */
       }
     },
     async ensureThread() {
@@ -135,6 +395,7 @@ export default {
         if (resp.ok && data.thread_id) {
           this.threadId = data.thread_id;
           localStorage.setItem(THREAD_KEY, this.threadId);
+          await this.loadSessions();
         }
       } catch {
         /* ignore */
@@ -157,6 +418,7 @@ export default {
       if (this.busy) return;
       this.refs = [];
       this.chatError = '';
+      this.closeMention();
       try {
         const resp = await fetch('/api/v1/chat/sessions', { method: 'POST' });
         const data = await resp.json();
@@ -164,24 +426,41 @@ export default {
           this.threadId = data.thread_id;
           localStorage.setItem(THREAD_KEY, this.threadId);
           this.messages = [];
+          await this.loadSessions();
+          this.sessionsOpen = false;
         }
       } catch {
         /* ignore */
       }
-    },
-    async clearThread() {
-      if (!this.threadId || this.busy) return;
-      await fetch(`/api/v1/chat/messages?thread_id=${encodeURIComponent(this.threadId)}`, {
-        method: 'DELETE',
-      });
-      this.messages = [];
-      this.chatError = '';
     },
     scrollToBottom() {
       const el = this.$refs.scrollRef;
       if (el) el.scrollTop = el.scrollHeight;
     },
     onKeydown(e) {
+      if (this.mention.active && this.mentionItems.length) {
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          this.mention.index = (this.mention.index + 1) % this.mentionItems.length;
+          return;
+        }
+        if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          this.mention.index =
+            (this.mention.index - 1 + this.mentionItems.length) % this.mentionItems.length;
+          return;
+        }
+        if (e.key === 'Enter' && !e.metaKey && !e.ctrlKey) {
+          e.preventDefault();
+          this.selectMention(this.mentionItems[this.mention.index]);
+          return;
+        }
+      }
+      if (e.key === 'Escape' && this.mention.active) {
+        e.preventDefault();
+        this.closeMention();
+        return;
+      }
       if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
         e.preventDefault();
         this.send();
@@ -196,6 +475,7 @@ export default {
       this.streaming = true;
       this.streamBuffer = '';
       this.chatError = '';
+      this.closeMention();
       this.messages.push({ role: 'user', content: text });
       this.draft = '';
       this.$nextTick(this.scrollToBottom);
@@ -244,6 +524,7 @@ export default {
               this.messages.push({ role: 'assistant', content: this.streamBuffer });
               this.streamBuffer = '';
               this.streaming = false;
+              this.loadSessions();
             }
           }
         }
@@ -272,7 +553,12 @@ export default {
   border-left: 1px solid #252b48;
   box-sizing: border-box;
   min-width: 280px;
-  max-width: 640px;
+  max-width: 960px;
+  transition: box-shadow 0.15s, background 0.15s;
+}
+.chat-panel--drop-target {
+  box-shadow: inset 0 0 0 2px rgba(59, 91, 219, 0.55);
+  background: #121836;
 }
 .chat-head {
   display: flex;
@@ -282,6 +568,89 @@ export default {
   padding: 16px 14px 10px;
   flex-shrink: 0;
   border-bottom: 1px solid #252b48;
+}
+.chat-head-main {
+  min-width: 0;
+  flex: 1;
+}
+.chat-active-session {
+  margin: 4px 0 0;
+  color: #a8b8ff;
+  font-size: 0.75rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chat-sessions {
+  flex-shrink: 0;
+  max-height: 200px;
+  overflow-y: auto;
+  border-bottom: 1px solid #252b48;
+  background: #0f1220;
+}
+.chat-sessions-empty {
+  margin: 0;
+  padding: 10px 14px;
+  color: #7a84a8;
+  font-size: 0.8rem;
+}
+.chat-session-row {
+  display: flex;
+  align-items: stretch;
+  border-bottom: 1px solid #1a2038;
+}
+.chat-session-row.active {
+  background: #1a2240;
+}
+.chat-session-btn {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 8px 10px 8px 14px;
+  border: none;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.chat-session-btn:hover {
+  background: #171d34;
+}
+.chat-session-title {
+  font-size: 0.82rem;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  width: 100%;
+}
+.chat-session-meta {
+  font-size: 0.68rem;
+  color: #7a84a8;
+}
+.chat-session-del {
+  flex-shrink: 0;
+  width: 32px;
+  border: none;
+  background: transparent;
+  color: #8b94b8;
+  font-size: 1rem;
+  cursor: pointer;
+  opacity: 0;
+}
+.chat-session-row:hover .chat-session-del {
+  opacity: 1;
+}
+.chat-session-del:hover {
+  color: #ffb4b4;
+  background: #3a1824;
+}
+.btn--active {
+  border-color: #3b5bdb;
+  background: #243055;
 }
 .chat-title {
   margin: 0;
@@ -346,6 +715,17 @@ export default {
   display: flex;
   gap: 6px;
   flex-wrap: wrap;
+  align-items: center;
+}
+.chat-refs-hint {
+  margin-left: auto;
+  color: #6b7394;
+  font-size: 0.68rem;
+}
+.chat-ref-toast {
+  margin: 6px 0 0;
+  color: #7ddea2;
+  font-size: 0.75rem;
 }
 .chat-ref-chips {
   display: flex;
@@ -363,9 +743,28 @@ export default {
   font-size: 0.72rem;
   color: #b8c0e0;
   max-width: 100%;
+}
+.ref-source {
+  flex-shrink: 0;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 0.58rem;
+  font-weight: 600;
+  line-height: 1.3;
+}
+.ref-source--bili {
+  background: #243055;
+  color: #a8b8ff;
+}
+.ref-source--xhs {
+  background: #3a1824;
+  color: #ffb4c8;
+}
+.ref-title {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  min-width: 0;
 }
 .chip-x {
   border: none;
@@ -375,6 +774,7 @@ export default {
   padding: 0 2px;
   font-size: 0.9rem;
   line-height: 1;
+  flex-shrink: 0;
 }
 .chip-x:hover {
   color: #ffb4b4;
@@ -383,6 +783,9 @@ export default {
   flex-shrink: 0;
   padding: 10px 14px 14px;
   border-top: 1px solid #252b48;
+}
+.chat-input-wrap {
+  position: relative;
 }
 .chat-input {
   width: 100%;
@@ -396,6 +799,63 @@ export default {
   resize: vertical;
   min-height: 72px;
   font-family: inherit;
+}
+.chat-panel--drop-target .chat-input {
+  border-color: #3b5bdb;
+}
+.mention-popup {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 6px);
+  margin: 0;
+  padding: 4px 0;
+  list-style: none;
+  max-height: 220px;
+  overflow-y: auto;
+  background: #151a2e;
+  border: 1px solid #3d4a7a;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  z-index: 10;
+}
+.mention-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  cursor: pointer;
+  font-size: 0.82rem;
+}
+.mention-item:hover,
+.mention-item--active {
+  background: #243055;
+}
+.mention-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mention-meta {
+  flex-shrink: 0;
+  color: #7a84a8;
+  font-size: 0.68rem;
+}
+.mention-empty {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 6px);
+  margin: 0;
+  padding: 8px 10px;
+  background: #151a2e;
+  border: 1px solid #3d4a7a;
+  border-radius: 8px;
+  color: #7a84a8;
+  font-size: 0.8rem;
+  z-index: 10;
 }
 .chat-send {
   width: 100%;
@@ -435,6 +895,9 @@ export default {
     min-height: 50vh;
     border-left: none;
     border-top: 1px solid #252b48;
+  }
+  .chat-refs-hint {
+    display: none;
   }
 }
 </style>

@@ -50,6 +50,49 @@
         autocomplete="off"
         placeholder="粘贴 Cookie，留空并保存可清除"
       />
+    </section>
+
+    <section class="panel">
+      <h2 class="section-title">对话 LLM（OpenAI 兼容）</h2>
+      <p class="hint">
+        右侧对话助手需 OpenAI 兼容 API。推荐在此配置；也可在 <code>backend/.env</code> 设置
+        <code>OPENAI_*</code> 作为 fallback（与 B 站 Cookie 相同优先级：设置页优先）。
+      </p>
+
+      <p v-if="openaiConfigured" class="status ok">
+        当前已配置 API Key：<code>{{ openaiMasked }}</code>
+      </p>
+      <p v-else class="status warn">尚未配置 API Key</p>
+
+      <label class="label" for="openai-key">OPENAI API KEY</label>
+      <input
+        id="openai-key"
+        v-model="openaiApiKey"
+        class="input"
+        type="password"
+        autocomplete="off"
+        placeholder="sk-… 或兼容网关密钥，留空不修改"
+      />
+
+      <label class="label" for="openai-base">OPENAI BASE URL</label>
+      <input
+        id="openai-base"
+        v-model="openaiBaseUrl"
+        class="input"
+        type="text"
+        autocomplete="off"
+        placeholder="https://api.openai.com/v1"
+      />
+
+      <label class="label" for="openai-model">OPENAI MODEL</label>
+      <input
+        id="openai-model"
+        v-model="openaiModel"
+        class="input"
+        type="text"
+        autocomplete="off"
+        placeholder="gpt-4o-mini"
+      />
 
       <div class="toolbar">
         <button class="btn primary" :disabled="saving" @click="save">
@@ -69,10 +112,15 @@ export default {
     return {
       sessdata: '',
       xhsCookie: '',
+      openaiApiKey: '',
+      openaiBaseUrl: 'https://api.openai.com/v1',
+      openaiModel: 'gpt-4o-mini',
       biliConfigured: false,
       biliMasked: '',
       xhsConfigured: false,
       xhsMasked: '',
+      openaiConfigured: false,
+      openaiMasked: '',
       saving: false,
       tip: '',
       tipOk: true,
@@ -82,15 +130,37 @@ export default {
     this.load();
   },
   methods: {
+    async parseJsonResponse(resp) {
+      const text = await resp.text();
+      if (!text || !text.trim()) {
+        if (!resp.ok) {
+          throw new Error(
+            resp.status >= 500
+              ? '后端未响应，请确认 8907 端口服务已启动'
+              : `请求失败 (${resp.status})，响应为空`,
+          );
+        }
+        return {};
+      }
+      try {
+        return JSON.parse(text);
+      } catch {
+        throw new Error(`服务器返回非 JSON（${resp.status}）`);
+      }
+    },
     async load() {
       try {
         const resp = await fetch('/api/v1/settings');
-        const data = await resp.json();
+        const data = await this.parseJsonResponse(resp);
         if (!resp.ok) return;
         this.biliConfigured = !!data.bilibili_sessdata_configured;
         this.biliMasked = data.bilibili_sessdata_masked || '';
         this.xhsConfigured = !!data.xiaohongshu_cookie_configured;
         this.xhsMasked = data.xiaohongshu_cookie_masked || '';
+        this.openaiConfigured = !!data.openai_api_key_configured;
+        this.openaiMasked = data.openai_api_key_masked || '';
+        this.openaiBaseUrl = data.openai_base_url || 'https://api.openai.com/v1';
+        this.openaiModel = data.openai_model || 'gpt-4o-mini';
       } catch {
         /* ignore */
       }
@@ -102,6 +172,9 @@ export default {
         const body = {};
         if (this.sessdata !== '') body.bilibili_sessdata = this.sessdata;
         if (this.xhsCookie !== '') body.xiaohongshu_cookie = this.xhsCookie;
+        if (this.openaiApiKey !== '') body.openai_api_key = this.openaiApiKey;
+        body.openai_base_url = (this.openaiBaseUrl || '').trim();
+        body.openai_model = (this.openaiModel || '').trim();
         if (!Object.keys(body).length) {
           this.tip = '请填写要更新的配置项';
           this.tipOk = false;
@@ -113,9 +186,9 @@ export default {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
         });
-        const data = await resp.json();
+        const data = await this.parseJsonResponse(resp);
         if (!resp.ok) {
-          this.tip = data.detail || '保存失败';
+          this.tip = data.detail || data.message || '保存失败';
           this.tipOk = false;
           return;
         }
@@ -123,8 +196,13 @@ export default {
         this.biliMasked = data.bilibili_sessdata_masked || '';
         this.xhsConfigured = !!data.xiaohongshu_cookie_configured;
         this.xhsMasked = data.xiaohongshu_cookie_masked || '';
+        this.openaiConfigured = !!data.openai_api_key_configured;
+        this.openaiMasked = data.openai_api_key_masked || '';
+        this.openaiBaseUrl = data.openai_base_url || 'https://api.openai.com/v1';
+        this.openaiModel = data.openai_model || 'gpt-4o-mini';
         this.sessdata = '';
         this.xhsCookie = '';
+        this.openaiApiKey = '';
         this.tip = '已保存';
         this.tipOk = true;
       } catch (e) {

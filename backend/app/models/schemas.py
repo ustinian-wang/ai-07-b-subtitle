@@ -161,11 +161,18 @@ class SettingsPublic(BaseModel):
     bilibili_sessdata_masked: str = ""
     xiaohongshu_cookie_configured: bool = False
     xiaohongshu_cookie_masked: str = ""
+    openai_api_key_configured: bool = False
+    openai_api_key_masked: str = ""
+    openai_base_url: str = "https://api.openai.com/v1"
+    openai_model: str = "gpt-4o-mini"
 
 
 class SettingsPatchRequest(BaseModel):
     bilibili_sessdata: str | None = None
     xiaohongshu_cookie: str | None = None
+    openai_api_key: str | None = None
+    openai_base_url: str | None = None
+    openai_model: str | None = None
 
 
 class ChatRequest(BaseModel):
@@ -186,6 +193,17 @@ class ChatMessagesResponse(BaseModel):
 
 class ChatSessionResponse(BaseModel):
     thread_id: str
+
+
+class ChatSessionSummary(BaseModel):
+    thread_id: str
+    title: str = "新对话"
+    updated_at: str = ""
+    message_count: int = 0
+
+
+class ChatSessionsListResponse(BaseModel):
+    sessions: list[ChatSessionSummary] = Field(default_factory=list)
 
 
 class ChatClearResponse(BaseModel):

@@ -21,6 +21,12 @@ def patch_settings(body: SettingsPatchRequest) -> SettingsPublic:
         patch["bilibili_sessdata"] = (updates["bilibili_sessdata"] or "").strip()
     if "xiaohongshu_cookie" in updates:
         patch["xiaohongshu_cookie"] = (updates["xiaohongshu_cookie"] or "").strip()
+    if "openai_api_key" in updates:
+        patch["openai_api_key"] = (updates["openai_api_key"] or "").strip()
+    if "openai_base_url" in updates:
+        patch["openai_base_url"] = (updates["openai_base_url"] or "").strip()
+    if "openai_model" in updates:
+        patch["openai_model"] = (updates["openai_model"] or "").strip()
     if patch:
         settings_store.patch_settings(patch)
     return SettingsPublic.model_validate(settings_store.public_settings())

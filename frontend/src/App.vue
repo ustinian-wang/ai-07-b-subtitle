@@ -225,6 +225,7 @@
       :current-record-title="result?.title || ''"
       :selected-ids="selectedIds"
       :record-map="recordMap"
+      :all-records="allRecords"
     />
     </div>
     </div>
@@ -334,6 +335,21 @@ export default {
       collect(this.tree.uncategorized);
       return map;
     },
+    allRecords() {
+      const out = [];
+      const collect = (records) => {
+        for (const r of records || []) out.push(r);
+      };
+      const walk = (folders) => {
+        for (const f of folders || []) {
+          collect(f.records);
+          walk(f.children);
+        }
+      };
+      walk(this.tree.folders);
+      collect(this.tree.uncategorized);
+      return out;
+    },
   },
   mounted() {
     this.loadSidebarWidth();
@@ -393,7 +409,7 @@ export default {
       }
     },
     clampChatWidth(width) {
-      const max = Math.min(640, Math.floor(window.innerWidth * 0.45));
+      const max = Math.min(960, Math.floor(window.innerWidth * 0.675));
       return Math.max(280, Math.min(max, width));
     },
     loadChatWidth() {

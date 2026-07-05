@@ -5,17 +5,36 @@ import uuid
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 
-from app.models.schemas import ChatClearResponse, ChatMessagesResponse, ChatRequest, ChatSessionResponse
+from app.models.schemas import (
+    ChatClearResponse,
+    ChatMessagesResponse,
+    ChatRequest,
+    ChatSessionResponse,
+    ChatSessionsListResponse,
+    ChatSessionSummary,
+)
 from app.services import chat_store
 from app.services.chat_stream import sse_chat_stream
 
 router = APIRouter(prefix="/api/v1/chat", tags=["chat"])
 
 
+@router.get("/sessions", response_model=ChatSessionsListResponse)
+def list_chat_sessions() -> ChatSessionsListResponse:
+    items = [ChatSessionSummary.model_validate(x) for x in chat_store.list_threads()]
+    return ChatSessionsListResponse(sessions=items)
+
+
 @router.post("/sessions", response_model=ChatSessionResponse)
 def create_chat_session() -> ChatSessionResponse:
     tid = chat_store.create_thread()
     return ChatSessionResponse(thread_id=tid)
+
+
+@router.delete("/sessions/{thread_id}", response_model=ChatClearResponse)
+def delete_chat_session(thread_id: str) -> ChatClearResponse:
+    chat_store.delete_thread(thread_id)
+    return ChatClearResponse(ok=True, thread_id=thread_id)
 
 
 @router.get("/messages", response_model=ChatMessagesResponse)

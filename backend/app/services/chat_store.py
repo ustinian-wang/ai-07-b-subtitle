@@ -55,8 +55,10 @@ def get_messages(thread_id: str) -> list[dict[str, str]]:
 def save_messages(thread_id: str, messages: list[dict[str, str]]) -> dict[str, Any]:
     path = _thread_path(thread_id)
     now = _now_iso()
+    prev = _read_thread_file(path) or {}
     payload = {
         "thread_id": thread_id,
+        "created_at": prev.get("created_at") or now,
         "updated_at": now,
         "title": _derive_title(messages),
         "messages": _normalize(messages),
@@ -74,15 +76,66 @@ def append_exchange(thread_id: str, user: str, assistant: str) -> list[dict[str,
 
 
 def clear_thread(thread_id: str) -> None:
-    path = _thread_path(thread_id)
-    if path.is_file():
-        path.unlink()
+    delete_thread(thread_id)
 
 
 def create_thread(thread_id: str | None = None) -> str:
     tid = (thread_id or "").strip() or uuid.uuid4().hex[:12]
-    save_messages(tid, [])
+    now = _now_iso()
+    path = _thread_path(tid)
+    if not path.is_file():
+        payload = {
+            "thread_id": tid,
+            "created_at": now,
+            "updated_at": now,
+            "title": "新对话",
+            "messages": [],
+        }
+        path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     return tid
+
+
+def _read_thread_file(path: Path) -> dict[str, Any] | None:
+    if not path.is_file():
+        return None
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError, UnicodeError):
+        return None
+    if not isinstance(raw, dict):
+        return None
+    return raw
+
+
+def list_threads() -> list[dict[str, Any]]:
+    """列出全部会话，按 updated_at 倒序。"""
+    out: list[dict[str, Any]] = []
+    for path in _sessions_dir().glob("*.json"):
+        snap = _read_thread_file(path)
+        if not snap:
+            continue
+        tid = str(snap.get("thread_id") or path.stem)
+        msgs = _normalize(snap.get("messages") or [])
+        title = str(snap.get("title") or "").strip() or _derive_title(msgs)
+        out.append(
+            {
+                "thread_id": tid,
+                "title": title[:120],
+                "updated_at": snap.get("updated_at") or snap.get("created_at") or "",
+                "message_count": len(msgs),
+            }
+        )
+    out = [x for x in out if x["message_count"] > 0]
+    out.sort(key=lambda x: x.get("updated_at") or "", reverse=True)
+    return out
+
+
+def delete_thread(thread_id: str) -> bool:
+    path = _thread_path(thread_id)
+    if not path.is_file():
+        return False
+    path.unlink()
+    return True
 
 
 def _normalize(raw: list[dict[str, Any]]) -> list[dict[str, str]]:
@@ -102,7 +155,10 @@ def _self_check() -> None:
     tid = create_thread()
     append_exchange(tid, "你好", "你好，有什么可以帮你？")
     assert len(get_messages(tid)) == 2
-    clear_thread(tid)
+    listed = list_threads()
+    assert any(x["thread_id"] == tid for x in listed)
+    assert listed[0]["message_count"] == 2
+    delete_thread(tid)
     assert get_messages(tid) == []
 
 
