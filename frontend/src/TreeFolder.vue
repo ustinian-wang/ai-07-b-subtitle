@@ -76,7 +76,7 @@
         />
       </li>
       <li v-if="!(folder.records || []).length && !(folder.children || []).length" class="tree-empty">
-        空文件夹 · 可拖入内容
+        空文件夹 · 可拖入笔记
       </li>
     </ul>
   </div>
@@ -152,7 +152,7 @@ export default {
       }
       event.dataTransfer.effectAllowed = 'copy';
       event.dataTransfer.setData('application/x-subtitle-ids', JSON.stringify(ids));
-      event.dataTransfer.setData('text/plain', `${this.folder.name} · ${ids.length} 条内容`);
+      event.dataTransfer.setData('text/plain', `${this.folder.name} · ${ids.length} 条笔记`);
       this.$emit('record-drag-start', { ids, purpose: 'ref' });
     },
     onDragEnd() {

@@ -10,8 +10,8 @@ from openai import AsyncOpenAI
 from app.services import chat_store, settings_store
 from app.services.subtitle_store import get_record, infer_source
 
-SYSTEM_PROMPT = """你是内容分析助手。用户会引用本地库中的 B 站字幕或小红书笔记作为上下文。
-请优先基于引用内容回答；若引用不足以回答，可结合常识并说明依据。
+SYSTEM_PROMPT = """你是笔记分析助手。用户会引用本地库中的 B 站字幕或小红书笔记作为上下文。
+请优先基于引用笔记回答；若引用不足以回答，可结合常识并说明依据。
 回答使用 Markdown，代码用 fenced code block。简洁准确。"""
 
 # ponytail: 单条引用最多字符，避免撑爆上下文
@@ -65,7 +65,7 @@ def _build_reference_block(record_ids: list[str]) -> str:
         parts.append(f"### [{label}] {title} (#{rid})\n\n{text}")
     if not parts:
         return ""
-    return "以下为用户引用的本地库内容：\n\n" + "\n\n---\n\n".join(parts)
+    return "以下为用户引用的本地库笔记：\n\n" + "\n\n---\n\n".join(parts)
 
 
 def build_messages(

@@ -14,7 +14,7 @@
         <p v-if="activeSessionTitle" class="chat-active-session" :title="activeSessionTitle">
           {{ activeSessionTitle }}
         </p>
-        <p v-else class="chat-sub">引用内容库笔记，多轮对话分析</p>
+        <p v-else class="chat-sub">引用笔记，多轮对话分析</p>
       </div>
       <div class="chat-head-actions">
         <button
@@ -161,6 +161,8 @@
           :disabled="busy"
           @input="onInput"
           @keydown="onKeydown"
+          @dragover="onComposerDragOver"
+          @drop="onComposerDrop"
         />
         <ul v-if="mention.active && mentionItems.length" class="mention-popup">
           <li
@@ -332,12 +334,29 @@ export default {
       if (added) this.showRefHint(`已引用 ${added} 条笔记`);
     },
     hasSubtitleDrag(e) {
-      return e.dataTransfer?.types?.includes(DRAG_MIME);
+      const types = e.dataTransfer?.types;
+      if (!types) return false;
+      for (let i = 0; i < types.length; i += 1) {
+        if (types[i] === DRAG_MIME) return true;
+      }
+      return false;
     },
     onDropZoneDragOver(e) {
       if (!this.hasSubtitleDrag(e)) return;
       e.preventDefault();
       e.dataTransfer.dropEffect = 'copy';
+    },
+    onComposerDragOver(e) {
+      if (!this.hasSubtitleDrag(e)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      e.dataTransfer.dropEffect = 'copy';
+    },
+    onComposerDrop(e) {
+      if (!this.hasSubtitleDrag(e)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      this.onDropZoneDrop(e);
     },
     onDropZoneEnter(e) {
       if (!this.hasSubtitleDrag(e)) return;

@@ -72,7 +72,7 @@ export default {
       const ids = this.dragIds();
       event.dataTransfer.effectAllowed = 'move';
       event.dataTransfer.setData('application/x-subtitle-ids', JSON.stringify(ids));
-      event.dataTransfer.setData('text/plain', `${ids.length} 条内容`);
+      event.dataTransfer.setData('text/plain', `${ids.length} 条笔记`);
       this.$emit('drag-start', { ids });
     },
     onDragEnd() {

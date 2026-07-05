@@ -12,7 +12,7 @@
     >
     <aside class="sidebar" :style="{ width: `${sidebarWidth}px` }">
       <div class="sidebar-head">
-        <h2>内容库<span v-if="tree.total_count" class="lib-count"> · {{ tree.total_count }} 条</span></h2>
+        <h2>笔记库<span v-if="tree.total_count" class="lib-count"> · {{ tree.total_count }} 条笔记</span></h2>
         <div class="sidebar-head-actions">
           <button class="btn tiny" title="新建根文件夹" @click="createFolder(null)">+ 文件夹</button>
           <button class="btn tiny" @click="loadTree">刷新</button>
@@ -55,7 +55,7 @@
         </div>
       </div>
 
-      <p v-if="!allRecordIds.length" class="empty">暂无保存记录</p>
+      <p v-if="!allRecordIds.length" class="empty">暂无保存笔记</p>
       <div
         v-else
         ref="treePane"
@@ -123,25 +123,25 @@
 
     <div
       class="sidebar-resizer"
-      title="拖拽调整内容库宽度"
+      title="拖拽调整笔记库宽度"
       @mousedown="startSidebarResize"
     />
 
     <div class="workspace">
     <main class="main extract-pane">
       <header class="head">
-        <h1>内容提取</h1>
-        <p class="hint">粘贴 B 站视频或小红书笔记链接，提取后自动保存到左侧内容库，右侧可对话分析</p>
+        <h1>笔记提取</h1>
+        <p class="hint">粘贴 B 站视频或小红书笔记链接，提取后自动保存到左侧笔记库，右侧可对话分析</p>
       </header>
 
       <section v-if="duplicatePrompt" class="panel duplicate">
         <p>
-          本地已有该记录
+          本地已有该笔记
           <strong>#{{ duplicatePrompt.existing_record_id }}</strong>
           （{{ duplicatePrompt.title }}）
         </p>
         <div class="toolbar">
-          <button class="btn primary" @click="viewExisting">直接查看已有记录</button>
+          <button class="btn primary" @click="viewExisting">直接查看已有笔记</button>
           <button class="btn" :disabled="loading" @click="extract(true)">
             {{ loading ? '提取中…' : '重新提取' }}
           </button>
@@ -720,7 +720,7 @@ export default {
         return;
       }
       if (action === 'delete') {
-        if (!window.confirm(`删除文件夹「${folder.name}」？内部内容将移到上级或未分类。`)) return;
+        if (!window.confirm(`删除文件夹「${folder.name}」？内部笔记将移到上级或未分类。`)) return;
         try {
           const resp = await fetch(`/api/v1/subtitle/folders/${folder.id}`, {
             method: 'DELETE',
@@ -816,7 +816,7 @@ export default {
       if (!this.duplicatePrompt) return;
       this.result = { ...this.duplicatePrompt, duplicate: true };
       this.duplicatePrompt = null;
-      this.savedTip = '已加载本地记录';
+      this.savedTip = '已加载本地笔记';
     },
     async openRecord(id) {
       this.error = '';
@@ -838,12 +838,12 @@ export default {
       }
     },
     async removeRecord(id) {
-      if (!window.confirm('确定删除这条内容记录？')) return;
+      if (!window.confirm('确定删除这条笔记？')) return;
       await this._deleteIds([id]);
     },
     async batchDelete() {
       if (!this.selectedIds.length) return;
-      if (!window.confirm(`确定删除选中的 ${this.selectedIds.length} 条记录？`)) return;
+      if (!window.confirm(`确定删除选中的 ${this.selectedIds.length} 条笔记？`)) return;
       await this._deleteIds([...this.selectedIds]);
     },
     async _deleteIds(ids) {
