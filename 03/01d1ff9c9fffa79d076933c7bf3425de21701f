@@ -1,0 +1,60 @@
+frontend/src/App.vue
+  s_7edb116a6bd726::t_a26817da38e84f 23
+  s_7edb116a6bd726::t_bdae472730b2e1 567-571,574-575
+  s_dc07f15f72f4eb::t_de53cc63ba6e7f 813
+  s_dc07f15f72f4eb::t_a6f8ba7b0c7da7 34
+  s_7edb116a6bd726::t_4365055441643a 1072-1081
+  s_7edb116a6bd726::t_83f8e5bf4b93de 384
+  s_7edb116a6bd726::t_89ba60292168b9 576
+  s_dc07f15f72f4eb::t_ef06d6fd26727b 618
+  s_7edb116a6bd726::t_7c699d88c7b92e 283
+frontend/src/ChatPanel.vue
+  s_e941dd9a5fdbe2::t_d8e57e894782a6 349,352,356
+  s_e941dd9a5fdbe2::t_255885e821208b 342-347,362
+  s_7edb116a6bd726::t_9fd7667ba42993 270
+frontend/src/TreeRecord.vue
+  s_e941dd9a5fdbe2::t_0350c74cb36f95 14
+  s_e941dd9a5fdbe2::t_4c81727584721c 50
+  s_bc5c85a8555fe0::t_67ed94bceb795e 80-81,84
+  s_e941dd9a5fdbe2::t_f1c302d7f77cf8 20-27
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "0301d1ff9c9fffa79d076933c7bf3425de21701f",
+  "prompts": {},
+  "sessions": {
+    "s_7edb116a6bd726": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "f99e0939-075e-4c70-8a48-03e5dc5e7980",
+        "model": "default"
+      },
+      "human_author": "jser <87244899@qq.com>"
+    },
+    "s_bc5c85a8555fe0": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "3993158a-1f1e-4080-935d-62ff185da161",
+        "model": "default"
+      },
+      "human_author": "jser <87244899@qq.com>"
+    },
+    "s_dc07f15f72f4eb": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "b8e98b04-9ee5-49ca-a7d0-47f2fb491340",
+        "model": "default"
+      },
+      "human_author": "jser <87244899@qq.com>"
+    },
+    "s_e941dd9a5fdbe2": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "a7421799-8b81-4788-981a-9810e7706a31",
+        "model": "default"
+      },
+      "human_author": "jser <87244899@qq.com>"
+    }
+  }
+}
