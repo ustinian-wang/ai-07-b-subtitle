@@ -1,0 +1,93 @@
+README.md
+  s_494438b44b9e5c::t_e2e7f6e473fd38 38-39
+  s_494438b44b9e5c::t_e14b830c7c827e 159
+  s_494438b44b9e5c::t_864319a17df319 165-176
+  s_494438b44b9e5c::t_ea4e5fb6633d1a 181
+  s_494438b44b9e5c::t_eb112a9d18cca2 183
+  s_494438b44b9e5c::t_64be553fc94692 191-192
+  s_494438b44b9e5c::t_e6df2290fb70b5 202
+  s_494438b44b9e5c::t_c15a37312a67d1 27-28
+  s_494438b44b9e5c::t_8206eb3bcb648c 16
+  s_494438b44b9e5c::t_0595eda0934591 17
+  s_494438b44b9e5c::t_8539c6762d858d 33
+  s_494438b44b9e5c::t_fcfb2dbf631da2 91-102
+  s_494438b44b9e5c::t_5942a662c71132 122-125
+backend/requirements.txt
+  s_494438b44b9e5c::t_f153706d562d67 6
+frontend/src/LibraryTree.vue
+  s_494438b44b9e5c::t_407cb761871a4f 49
+  s_494438b44b9e5c::t_b34fba394ff919 50-52
+  s_494438b44b9e5c::t_dc22e1b23c2999 53-72
+backend/app/main.py
+  s_494438b44b9e5c::t_a5a01ead36f386 8,16
+frontend/src/App.vue
+  s_494438b44b9e5c::t_745468aa968f7d 1288-1299
+  s_494438b44b9e5c::t_988fd242db4711 1039-1043
+  s_494438b44b9e5c::t_aad27c2ab1315f 15-22
+  s_494438b44b9e5c::t_4737d52a8ef22a 322-336,340,344
+  s_494438b44b9e5c::t_49e866e3c32bb0 32
+  s_494438b44b9e5c::t_ef31f5d1f5ff96 944
+  s_494438b44b9e5c::t_78f125e88445b4 237,241
+  s_494438b44b9e5c::t_692347de380dea 215-229
+  s_494438b44b9e5c::t_51483291599181 599,606-622
+  s_494438b44b9e5c::t_07f7ed3d0f27a5 25
+  s_494438b44b9e5c::t_b84cca92a507ac 350
+  s_494438b44b9e5c::t_dbf3e957ededc6 749
+  s_494438b44b9e5c::t_f6c48f3e153c1e 1014-1022
+  s_494438b44b9e5c::t_e8aac9a877cdd4 1108-1109
+  s_494438b44b9e5c::t_ca9fa5e4c4d2dd 957-964,968,971-1000
+  s_494438b44b9e5c::t_5301c7d8a30d07 258,260
+  s_494438b44b9e5c::t_55927dc4349e58 115-116
+  s_494438b44b9e5c::t_f2085e634650d3 395-431
+backend/app/services/chat_store.py
+  s_494438b44b9e5c::t_b66b818d9a27a4 1-111
+backend/app/api/v1/chat.py
+  s_494438b44b9e5c::t_35cd41c474f58b 1-48
+scripts/dev.sh
+  s_494438b44b9e5c::t_749c2bcf3bee2d 76-80
+  s_494438b44b9e5c::t_61cfbc8d908fbf 81
+backend/app/models/schemas.py
+  s_494438b44b9e5c::t_8135223a57a4b0 169-193
+frontend/src/ChatPanel.vue
+  s_494438b44b9e5c::t_f97940fffcb81a 1-159,171-429,440
+  s_494438b44b9e5c::t_cc7895a9bf40df 160-170
+  s_494438b44b9e5c::t_82bdd38aee31da 430-439
+backend/app/services/chat_stream.py
+  s_494438b44b9e5c::t_5baa73e7edce72 11
+  s_494438b44b9e5c::t_f9a67226328740 1-10,12-35,37-99
+  s_494438b44b9e5c::t_d44f3c50900773 36
+frontend/src/TreeRecord.vue
+  s_494438b44b9e5c::t_47c03d968af83b 23-29
+  s_494438b44b9e5c::t_6c54d688e81231 144-165,167-168
+  s_494438b44b9e5c::t_e37327bc50a6ab 33
+backend/app/api/v1/subtitle.py
+  s_494438b44b9e5c::t_046e7d5507615d 130
+  s_494438b44b9e5c::t_9b2fc3991c421a 40
+backend/.env.example
+  s_494438b44b9e5c::t_a4a260be534b2c 7-11
+backend/app/services/subtitle_store.py
+  s_494438b44b9e5c::t_9f2a6713f6bff3 42-61,63
+  s_494438b44b9e5c::t_8986db1635bc3e 344
+  s_494438b44b9e5c::t_3b85573748e059 297-304
+  s_494438b44b9e5c::t_2e6541f179dcbb 285-289
+  s_494438b44b9e5c::t_d4021a7ba1df33 120
+  s_494438b44b9e5c::t_85041a92f39ea4 141-142
+  s_494438b44b9e5c::t_0db8d198cdb8ac 383
+  s_494438b44b9e5c::t_3894a7729a7fd7 423-426
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "fe43e272445343cfac4c6e514d1331f8ce163ed9",
+  "prompts": {},
+  "sessions": {
+    "s_494438b44b9e5c": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "72812374-9fa8-4ff5-909a-110ac9a87421",
+        "model": "default"
+      },
+      "human_author": "jser <87244899@qq.com>"
+    }
+  }
+}
