@@ -16,7 +16,7 @@ def load_settings() -> None:
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(extra="ignore")
 
-    backend_port: int = 8805
+    backend_port: int = 8907
     backend_host: str = "127.0.0.1"
 
 
