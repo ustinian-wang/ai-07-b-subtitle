@@ -11,7 +11,7 @@
 - 自动优先选择中文字幕轨（`zh-cn` / `zh` / `ai-zh` 等）
 - **提取后自动保存**到本地字幕库（`backend/data/subtitles/*.json`）
 - **去重**：同一 `bvid + page + 字幕轨 lan` 仅一条；重复提取时提示，可查看已有或 `force: true` 强制重拉
-- **字幕库侧栏**：卡片列表、多选、全选、批量删除 / 复制 / 导出 txt·json
+- **字幕库侧栏**：目录树（文件夹 + 字幕文件）、折叠展开、新建/重命名/删除文件夹、批量移动/删除/复制/导出
 - **设置页**（右上角）：配置 B 站登录 Cookie **`SESSDATA`**，存 `backend/data/settings.json`（API 响应脱敏）
 - **开发热更**：`scripts/dev.sh dev` 或 `uvicorn --reload` + Vite HMR
 
@@ -26,6 +26,7 @@ ai-07-b-subtitle/
 │   │   └── models/          # Pydantic schemas
 │   ├── data/                # 本地数据（.gitignore，不入库）
 │   │   ├── subtitles/       # 字幕记录 *.json
+│   │   ├── folders.json     # 文件夹树
 │   │   └── settings.json    # SESSDATA 等
 │   ├── .env.example
 │   └── requirements.txt
@@ -91,7 +92,12 @@ npm install && npm run dev -- --host 0.0.0.0 --port 9177
 | GET | `/api/health` | 健康检查 |
 | POST | `/api/v1/subtitle/extract` | 提取字幕；body 见下 |
 | POST | `/api/v1/subtitle/save` | 手动保存（一般无需，提取已自动落盘） |
-| GET | `/api/v1/subtitle/records` | 字幕库列表（摘要） |
+| GET | `/api/v1/subtitle/tree` | 目录树（文件夹嵌套 + 未分类字幕） |
+| POST | `/api/v1/subtitle/folders` | 新建文件夹，`{"name":"…","parent_id":null}` |
+| PATCH | `/api/v1/subtitle/folders/{id}` | 重命名或移动文件夹 |
+| DELETE | `/api/v1/subtitle/folders/{id}` | 删除文件夹（字幕移至上级/未分类） |
+| POST | `/api/v1/subtitle/records/batch-move` | 批量移动，`{"ids":[…],"folder_id":null}` |
+| GET | `/api/v1/subtitle/records` | 字幕库列表（扁平，摘要） |
 | GET | `/api/v1/subtitle/records/{id}` | 单条字幕详情 |
 | DELETE | `/api/v1/subtitle/records/{id}` | 删除一条 |
 | POST | `/api/v1/subtitle/records/batch-delete` | 批量删除，`{"ids":["id1","id2"]}` |
@@ -106,7 +112,8 @@ npm install && npm run dev -- --host 0.0.0.0 --port 9177
   "url": "https://www.bilibili.com/video/BV1Eb411u7Fw",
   "page": 1,
   "lang": null,
-  "force": false
+  "force": false,
+  "folder_id": null
 }
 ```
 
@@ -116,6 +123,7 @@ npm install && npm run dev -- --host 0.0.0.0 --port 9177
 | `page` | 分 P 序号，默认 1 |
 | `lang` | 可选，优先字幕语言，如 `zh-CN` |
 | `force` | `true` 时忽略本地去重，重新请求 B 站并 upsert |
+| `folder_id` | 保存到指定文件夹；`null` 为未分类。选中侧栏文件夹后前端会自动带上 |
 
 **去重命中**时返回 `duplicate: true`、`existing_record_id`，不调用 B 站 API；前端会提示「直接查看」或「重新提取」。
 
@@ -125,7 +133,8 @@ npm install && npm run dev -- --host 0.0.0.0 --port 9177
 
 | 路径 | 内容 |
 |------|------|
-| `backend/data/subtitles/{id}.json` | 单条字幕：bvid、title、lines、text、dedupe_key、时间戳等 |
+| `backend/data/subtitles/{id}.json` | 单条字幕：bvid、title、lines、text、**folder_id**、dedupe_key、时间戳等 |
+| `backend/data/folders.json` | 文件夹树：`{ id, name, parent_id }` |
 | `backend/data/settings.json` | 应用设置（当前仅 `bilibili_sessdata`） |
 
 - **去重键**：`{bvid}_p{page}_{lan}`，同键 upsert 更新而非新建文件

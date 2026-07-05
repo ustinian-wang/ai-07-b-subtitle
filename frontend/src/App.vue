@@ -12,14 +12,21 @@
 
     <SettingsPage v-if="view === 'settings'" @back="view = 'main'" />
 
-    <div v-else class="layout">
-    <aside class="sidebar">
+    <div v-else class="layout" :class="{ 'layout--resizing': resizingSidebar }">
+    <aside class="sidebar" :style="{ width: `${sidebarWidth}px` }">
       <div class="sidebar-head">
         <h2>字幕库</h2>
-        <button class="btn tiny" @click="loadRecords">刷新</button>
+        <div class="sidebar-head-actions">
+          <button class="btn tiny" title="新建根文件夹" @click="createFolder(null)">+ 文件夹</button>
+          <button class="btn tiny" @click="loadTree">刷新</button>
+        </div>
       </div>
 
-      <div v-if="records.length" class="batch-bar">
+      <p v-if="activeFolderLabel" class="save-target">
+        新提取保存到：<strong>{{ activeFolderLabel }}</strong>
+      </p>
+
+      <div v-if="allRecordIds.length" class="batch-bar">
         <label class="check">
           <input
             type="checkbox"
@@ -30,7 +37,11 @@
           全选
         </label>
         <span class="batch-count">{{ selectedIds.length }} 条</span>
+        <span class="batch-hint">框选 · 拖到文件夹</span>
         <div class="batch-actions">
+          <button class="btn tiny" :disabled="!selectedIds.length" @click="batchMove">
+            移动
+          </button>
           <button class="btn tiny" :disabled="!selectedIds.length" @click="batchCopy">
             复制
           </button>
@@ -50,60 +61,51 @@
         </div>
       </div>
 
-      <p v-if="!records.length" class="empty">暂无保存记录</p>
-      <div v-else class="sidebar-scroll">
-        <ul class="card-list">
-          <li
-            v-for="item in records"
-            :key="item.id"
-            :class="[
-              'record-card',
-              {
-                active: result?.record_id === item.id,
-                selected: selectedIds.includes(item.id),
-              },
-            ]"
-          >
-            <div class="card-top">
-              <label class="card-check" @click.stop>
-                <input
-                  type="checkbox"
-                  :checked="selectedIds.includes(item.id)"
-                  @change="toggleSelect(item.id)"
-                />
-              </label>
-              <button class="card-main" type="button" @click="openRecord(item.id)">
-                <h3 class="card-title" :title="item.title || item.bvid">
-                  {{ item.title || item.bvid }}
-                </h3>
-                <p v-if="item.page_title" class="card-subtitle">{{ item.page_title }}</p>
-              </button>
-              <button
-                class="card-del"
-                type="button"
-                title="删除"
-                @click.stop="removeRecord(item.id)"
-              >
-                ×
-              </button>
-            </div>
-
-            <button class="card-body" type="button" @click="openRecord(item.id)">
-              <div class="card-tags">
-                <span class="card-tag card-tag--bvid">{{ item.bvid }}</span>
-                <span class="card-tag">P{{ item.page }}</span>
-                <span v-if="item.lan_doc" class="card-tag card-tag--lan">{{ item.lan_doc }}</span>
-                <span class="card-tag">{{ item.line_count }} 条</span>
-              </div>
-              <div class="card-footer">
-                <span class="card-time">{{ formatUpdatedAt(item.updated_at) }}</span>
-                <span class="card-id">#{{ item.id }}</span>
-              </div>
-            </button>
-          </li>
-        </ul>
+      <p v-if="!allRecordIds.length" class="empty">暂无保存记录</p>
+      <div
+        v-else
+        ref="treePane"
+        class="sidebar-scroll"
+        :class="{
+          'sidebar-scroll--marquee': marquee.active,
+          'sidebar-scroll--dragging': draggingRecordIds.length > 0,
+        }"
+        @mousedown="onMarqueeStart"
+      >
+        <div
+          v-if="marquee.active && marquee.w > 2 && marquee.h > 2"
+          class="marquee-box"
+          :style="marqueeStyle"
+        />
+        <LibraryTree
+          :folders="tree.folders"
+          :uncategorized="tree.uncategorized"
+          :expanded-ids="expandedIds"
+          :selected-ids="selectedIds"
+          :dragging-record-ids="draggingRecordIds"
+          :drop-target-id="dropTargetFolderId"
+          :active-record-id="result?.record_id || ''"
+          :active-folder-id="activeFolderId"
+          @toggle-expand="toggleExpand"
+          @select-folder="selectFolder"
+          @folder-action="onFolderAction"
+          @open-record="openRecord"
+          @toggle-select="toggleSelect"
+          @remove-record="removeRecord"
+          @record-drag-start="onRecordDragStart"
+          @record-drag-end="onRecordDragEnd"
+          @folder-drag-over="onFolderDragOver"
+          @folder-drag-leave="onFolderDragLeave"
+          @folder-drop="onFolderDrop"
+        />
       </div>
     </aside>
+
+    <div
+      class="sidebar-resizer"
+      title="拖拽调整字幕库宽度"
+      @mousedown="startSidebarResize"
+    />
 
     <main class="main">
       <header class="head">
@@ -183,10 +185,11 @@
 
 <script>
 import SettingsPage from './SettingsPage.vue';
+import LibraryTree from './LibraryTree.vue';
 
 export default {
   name: 'App',
-  components: { SettingsPage },
+  components: { SettingsPage, LibraryTree },
   data() {
     return {
       view: 'main',
@@ -195,36 +198,368 @@ export default {
       loading: false,
       error: '',
       result: null,
-      records: [],
+      tree: { folders: [], uncategorized: [], total_count: 0 },
+      expandedIds: new Set(['__uncategorized__']),
+      activeFolderId: null,
       selectedIds: [],
       copied: false,
       savedTip: '',
       duplicatePrompt: null,
+      sidebarWidth: 360,
+      resizingSidebar: false,
+      draggingRecordIds: [],
+      dropTargetFolderId: null,
+      marquee: { active: false, startX: 0, startY: 0, x: 0, y: 0, w: 0, h: 0 },
     };
   },
   computed: {
+    allRecordIds() {
+      const ids = [];
+      const walk = (folders) => {
+        for (const f of folders || []) {
+          for (const r of f.records || []) ids.push(r.id);
+          walk(f.children || []);
+        }
+      };
+      walk(this.tree.folders);
+      for (const r of this.tree.uncategorized || []) ids.push(r.id);
+      return ids;
+    },
     allSelected() {
-      return this.records.length > 0 && this.selectedIds.length === this.records.length;
+      return this.allRecordIds.length > 0 && this.selectedIds.length === this.allRecordIds.length;
     },
     someSelected() {
       return this.selectedIds.length > 0;
     },
+    activeFolderLabel() {
+      if (this.activeFolderId === null) return '未分类';
+      const found = this.findFolder(this.tree.folders, this.activeFolderId);
+      return found ? found.name : '未分类';
+    },
+    marqueeStyle() {
+      return {
+        left: `${this.marquee.x}px`,
+        top: `${this.marquee.y}px`,
+        width: `${this.marquee.w}px`,
+        height: `${this.marquee.h}px`,
+      };
+    },
   },
   mounted() {
-    this.loadRecords();
+    this.loadSidebarWidth();
+    this.loadTree();
+    this._onWindowResize = () => {
+      this.sidebarWidth = this.clampSidebarWidth(this.sidebarWidth);
+    };
+    window.addEventListener('resize', this._onWindowResize);
+  },
+  beforeUnmount() {
+    this.stopSidebarResize();
+    this.stopMarquee();
+    this.onRecordDragEnd();
+    if (this._onWindowResize) {
+      window.removeEventListener('resize', this._onWindowResize);
+    }
   },
   methods: {
-    async loadRecords() {
+    clampSidebarWidth(width) {
+      const max = Math.min(720, Math.floor(window.innerWidth * 0.65));
+      return Math.max(240, Math.min(max, width));
+    },
+    loadSidebarWidth() {
       try {
-        const resp = await fetch('/api/v1/subtitle/records');
-        this.records = resp.ok ? await resp.json() : [];
-        this.selectedIds = this.selectedIds.filter((id) =>
-          this.records.some((r) => r.id === id)
-        );
+        const raw = localStorage.getItem('b-subtitle-sidebar-width');
+        const n = parseInt(raw, 10);
+        if (!Number.isNaN(n)) this.sidebarWidth = this.clampSidebarWidth(n);
       } catch {
-        this.records = [];
+        /* ponytail: localStorage 不可用时用默认宽度 */
+      }
+    },
+    startSidebarResize(event) {
+      if (window.matchMedia('(max-width: 860px)').matches) return;
+      event.preventDefault();
+      this.resizingSidebar = true;
+      this._resizeStartX = event.clientX;
+      this._resizeStartWidth = this.sidebarWidth;
+      document.addEventListener('mousemove', this.onSidebarResize);
+      document.addEventListener('mouseup', this.stopSidebarResize);
+    },
+    onSidebarResize(event) {
+      const delta = event.clientX - this._resizeStartX;
+      this.sidebarWidth = this.clampSidebarWidth(this._resizeStartWidth + delta);
+    },
+    stopSidebarResize() {
+      if (!this.resizingSidebar) return;
+      this.resizingSidebar = false;
+      document.removeEventListener('mousemove', this.onSidebarResize);
+      document.removeEventListener('mouseup', this.stopSidebarResize);
+      try {
+        localStorage.setItem('b-subtitle-sidebar-width', String(this.sidebarWidth));
+      } catch {
+        /* ignore */
+      }
+    },
+    isMarqueeBlockedTarget(target) {
+      if (!(target instanceof Element)) return true;
+      if (target.closest('button, input, label, .tree-mini, .sidebar-resizer')) return true;
+      // 点在字幕行上优先走拖拽，空白区域才拉框
+      if (target.closest('.tree-record')) return true;
+      return false;
+    },
+    rectsIntersect(a, b) {
+      return a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+    },
+    onMarqueeStart(event) {
+      if (event.button !== 0 || this.marquee.active || this.draggingRecordIds.length) return;
+      if (this.isMarqueeBlockedTarget(event.target)) return;
+      const pane = this.$refs.treePane;
+      if (!pane) return;
+
+      const rect = pane.getBoundingClientRect();
+      const startX = event.clientX - rect.left;
+      const startY = event.clientY - rect.top + pane.scrollTop;
+
+      this._marqueePane = pane;
+      this._marqueeAdditive = event.ctrlKey || event.metaKey || event.shiftKey;
+      this._marqueeBase = this._marqueeAdditive ? [...this.selectedIds] : [];
+      if (!this._marqueeAdditive) this.selectedIds = [];
+
+      this.marquee = {
+        active: true,
+        startX,
+        startY,
+        x: startX,
+        y: startY,
+        w: 0,
+        h: 0,
+      };
+
+      document.addEventListener('mousemove', this.onMarqueeMove);
+      document.addEventListener('mouseup', this.onMarqueeEnd);
+    },
+    onMarqueeMove(event) {
+      if (!this.marquee.active || !this._marqueePane) return;
+      const pane = this._marqueePane;
+      const rect = pane.getBoundingClientRect();
+      const curX = event.clientX - rect.left;
+      const curY = event.clientY - rect.top + pane.scrollTop;
+
+      const x = Math.min(this.marquee.startX, curX);
+      const y = Math.min(this.marquee.startY, curY);
+      const w = Math.abs(curX - this.marquee.startX);
+      const h = Math.abs(curY - this.marquee.startY);
+      this.marquee = { ...this.marquee, x, y, w, h };
+      this.updateMarqueeSelection();
+    },
+    updateMarqueeSelection() {
+      const pane = this._marqueePane;
+      if (!pane) return;
+      const box = {
+        left: this.marquee.x,
+        top: this.marquee.y,
+        right: this.marquee.x + this.marquee.w,
+        bottom: this.marquee.y + this.marquee.h,
+      };
+      const paneRect = pane.getBoundingClientRect();
+      const scrollTop = pane.scrollTop;
+      const hit = [];
+      pane.querySelectorAll('.tree-record[data-record-id]').forEach((el) => {
+        const r = el.getBoundingClientRect();
+        const rel = {
+          left: r.left - paneRect.left,
+          top: r.top - paneRect.top + scrollTop,
+          right: r.right - paneRect.left,
+          bottom: r.bottom - paneRect.top + scrollTop,
+        };
+        if (this.rectsIntersect(box, rel)) {
+          hit.push(el.dataset.recordId);
+        }
+      });
+      this.selectedIds = this._marqueeAdditive
+        ? [...new Set([...this._marqueeBase, ...hit])]
+        : hit;
+    },
+    onMarqueeEnd() {
+      if (!this.marquee.active) return;
+      this.marquee = { ...this.marquee, active: false };
+      this.stopMarquee();
+    },
+    stopMarquee() {
+      document.removeEventListener('mousemove', this.onMarqueeMove);
+      document.removeEventListener('mouseup', this.onMarqueeEnd);
+      this._marqueePane = null;
+    },
+    onRecordDragStart({ ids }) {
+      this.draggingRecordIds = ids;
+    },
+    onRecordDragEnd() {
+      this.draggingRecordIds = [];
+      this.dropTargetFolderId = null;
+    },
+    onFolderDragOver(folderId) {
+      this.dropTargetFolderId = folderId;
+      if (folderId && folderId !== '__uncategorized__' && !this.expandedIds.has(folderId)) {
+        const next = new Set(this.expandedIds);
+        next.add(folderId);
+        this.expandedIds = next;
+      }
+    },
+    onFolderDragLeave(folderId) {
+      if (this.dropTargetFolderId === folderId) {
+        this.dropTargetFolderId = null;
+      }
+    },
+    async onFolderDrop(folderId) {
+      const ids = this.draggingRecordIds.length ? this.draggingRecordIds : [...this.selectedIds];
+      const targetId = folderId === '__uncategorized__' ? null : folderId;
+      await this.moveRecordsToFolder(ids, targetId);
+      this.onRecordDragEnd();
+    },
+    async moveRecordsToFolder(ids, folderId) {
+      if (!ids.length) return;
+      try {
+        const resp = await fetch('/api/v1/subtitle/records/batch-move', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ids, folder_id: folderId }),
+        });
+        const data = await resp.json();
+        if (!resp.ok) {
+          this.error = data.detail || '移动失败';
+          return;
+        }
+        const next = new Set(this.expandedIds);
+        if (folderId) next.add(folderId);
+        else next.add('__uncategorized__');
+        this.expandedIds = next;
+        this.activeFolderId = folderId;
+        await this.loadTree();
+        this.selectedIds = ids.filter((id) => this.allRecordIds.includes(id));
+        if (data.moved.length) {
+          this.savedTip = `已移动 ${data.moved.length} 条到${folderId ? '文件夹' : '未分类'}`;
+          setTimeout(() => {
+            if (this.savedTip.startsWith('已移动')) this.savedTip = '';
+          }, 2000);
+        }
+      } catch (e) {
+        this.error = String(e);
+      }
+    },
+    findFolder(folders, id) {
+      for (const f of folders || []) {
+        if (f.id === id) return f;
+        const child = this.findFolder(f.children, id);
+        if (child) return child;
+      }
+      return null;
+    },
+    flattenFolderOptions(folders, depth = 0, out = []) {
+      for (const f of folders || []) {
+        out.push({ id: f.id, label: `${'　'.repeat(depth)}📂 ${f.name}` });
+        this.flattenFolderOptions(f.children, depth + 1, out);
+      }
+      return out;
+    },
+    async loadTree() {
+      try {
+        const resp = await fetch('/api/v1/subtitle/tree');
+        this.tree = resp.ok
+          ? await resp.json()
+          : { folders: [], uncategorized: [], total_count: 0 };
+        this.selectedIds = this.selectedIds.filter((id) => this.allRecordIds.includes(id));
+      } catch {
+        this.tree = { folders: [], uncategorized: [], total_count: 0 };
         this.selectedIds = [];
       }
+    },
+    toggleExpand(id) {
+      const next = new Set(this.expandedIds);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      this.expandedIds = next;
+    },
+    selectFolder(folderId) {
+      this.activeFolderId = folderId;
+    },
+    async createFolder(parentId) {
+      const name = window.prompt('文件夹名称');
+      if (!name || !name.trim()) return;
+      try {
+        const resp = await fetch('/api/v1/subtitle/folders', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: name.trim(), parent_id: parentId }),
+        });
+        const data = await resp.json();
+        if (!resp.ok) {
+          this.error = data.detail || '创建失败';
+          return;
+        }
+        const next = new Set(this.expandedIds);
+        if (parentId) next.add(parentId);
+        this.expandedIds = next;
+        this.activeFolderId = data.id;
+        await this.loadTree();
+      } catch (e) {
+        this.error = String(e);
+      }
+    },
+    async onFolderAction({ action, folder }) {
+      if (action === 'new-child') {
+        await this.createFolder(folder.id);
+        return;
+      }
+      if (action === 'rename') {
+        const name = window.prompt('重命名文件夹', folder.name);
+        if (!name || !name.trim() || name.trim() === folder.name) return;
+        try {
+          const resp = await fetch(`/api/v1/subtitle/folders/${folder.id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: name.trim() }),
+          });
+          const data = await resp.json();
+          if (!resp.ok) {
+            this.error = data.detail || '重命名失败';
+            return;
+          }
+          await this.loadTree();
+        } catch (e) {
+          this.error = String(e);
+        }
+        return;
+      }
+      if (action === 'delete') {
+        if (!window.confirm(`删除文件夹「${folder.name}」？内部字幕将移到上级或未分类。`)) return;
+        try {
+          const resp = await fetch(`/api/v1/subtitle/folders/${folder.id}`, {
+            method: 'DELETE',
+          });
+          const data = await resp.json();
+          if (!resp.ok) {
+            this.error = data.detail || '删除失败';
+            return;
+          }
+          if (this.activeFolderId === folder.id) this.activeFolderId = null;
+          await this.loadTree();
+        } catch (e) {
+          this.error = String(e);
+        }
+      }
+    },
+    async batchMove() {
+      if (!this.selectedIds.length) return;
+      const options = [{ id: '', label: '📁 未分类' }, ...this.flattenFolderOptions(this.tree.folders)];
+      const msg = options.map((o, i) => `${i}. ${o.label}`).join('\n');
+      const input = window.prompt(`移动到（输入序号）:\n${msg}`, '0');
+      if (input === null) return;
+      const idx = parseInt(input, 10);
+      if (Number.isNaN(idx) || idx < 0 || idx >= options.length) {
+        this.error = '无效的文件夹序号';
+        return;
+      }
+      const folderId = options[idx].id || null;
+      await this.moveRecordsToFolder([...this.selectedIds], folderId);
     },
     toggleSelect(id) {
       const idx = this.selectedIds.indexOf(id);
@@ -238,15 +573,8 @@ export default {
       if (this.allSelected) {
         this.selectedIds = [];
       } else {
-        this.selectedIds = this.records.map((r) => r.id);
+        this.selectedIds = [...this.allRecordIds];
       }
-    },
-    formatUpdatedAt(iso) {
-      if (!iso) return '—';
-      const d = new Date(iso);
-      if (Number.isNaN(d.getTime())) return iso;
-      const pad = (n) => String(n).padStart(2, '0');
-      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
     },
     async extract(force) {
       this.error = '';
@@ -270,6 +598,7 @@ export default {
             page: this.page || 1,
             save: true,
             force: !!force,
+            folder_id: this.activeFolderId,
           }),
         });
         const data = await resp.json();
@@ -286,7 +615,7 @@ export default {
         if (data.record_id) {
           this.savedTip = force ? '已重新提取并保存' : '已保存到库';
         }
-        await this.loadRecords();
+        await this.loadTree();
       } catch (e) {
         this.error = String(e);
       } finally {
@@ -343,7 +672,7 @@ export default {
           this.result = null;
         }
         this.selectedIds = this.selectedIds.filter((id) => !data.deleted.includes(id));
-        await this.loadRecords();
+        await this.loadTree();
       } catch (e) {
         this.error = String(e);
       }
@@ -444,23 +773,70 @@ body {
   min-height: 100vh;
 }
 .sidebar {
-  width: 320px;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
   height: 100vh;
   padding: 20px 16px 16px;
   background: #12162a;
-  border-right: 1px solid #252b48;
   box-sizing: border-box;
   overflow: hidden;
+}
+.sidebar-resizer {
+  flex-shrink: 0;
+  width: 6px;
+  margin: 0 -3px;
+  cursor: col-resize;
+  position: relative;
+  z-index: 5;
+  background: transparent;
+  transition: background 0.15s;
+}
+.sidebar-resizer:hover,
+.layout--resizing .sidebar-resizer {
+  background: rgba(59, 91, 219, 0.25);
+}
+.sidebar-resizer::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  transform: translateX(-50%);
+  background: #252b48;
+}
+.layout--resizing {
+  cursor: col-resize;
+  user-select: none;
+}
+.layout--resizing * {
+  cursor: col-resize !important;
 }
 .sidebar-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 12px;
+  margin-bottom: 8px;
   flex-shrink: 0;
+  gap: 8px;
+}
+.sidebar-head-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.save-target {
+  margin: 0 0 10px;
+  padding: 6px 10px;
+  background: #151a2e;
+  border-radius: 6px;
+  color: #8b94b8;
+  font-size: 0.78rem;
+  flex-shrink: 0;
+}
+.save-target strong {
+  color: #a8b8ff;
 }
 .sidebar-head h2 {
   margin: 0;
@@ -490,6 +866,28 @@ body {
   overflow-y: auto;
   margin-right: -6px;
   padding-right: 6px;
+  position: relative;
+}
+.sidebar-scroll--marquee {
+  cursor: crosshair;
+  user-select: none;
+}
+.sidebar-scroll--dragging {
+  cursor: grabbing;
+}
+.marquee-box {
+  position: absolute;
+  z-index: 20;
+  border: 1px solid rgba(59, 91, 219, 0.85);
+  background: rgba(59, 91, 219, 0.18);
+  pointer-events: none;
+  border-radius: 4px;
+}
+.batch-hint {
+  display: block;
+  margin-top: 4px;
+  color: #6b7394;
+  font-size: 0.72rem;
 }
 .sidebar-scroll::-webkit-scrollbar {
   width: 6px;
@@ -503,145 +901,9 @@ body {
   font-size: 0.88rem;
   flex-shrink: 0;
 }
-.card-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-.record-card {
-  background: #151a2e;
-  border: 1px solid #252b48;
-  border-radius: 10px;
-  overflow: hidden;
-  transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
-}
-.record-card:hover {
-  background: #1a2038;
-  border-color: #323b5c;
-}
-.record-card.active {
-  border-color: #3b5bdb;
-  box-shadow: 0 0 0 1px rgba(59, 91, 219, 0.35);
-}
-.record-card.selected {
-  border-color: #4a6cf0;
-  background: #171d34;
-}
-.card-top {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  padding: 10px 10px 0;
-}
-.card-check {
-  flex-shrink: 0;
-  padding-top: 3px;
-  cursor: pointer;
-}
-.card-main {
-  flex: 1;
-  min-width: 0;
-  margin: 0;
-  padding: 0;
-  border: none;
-  background: transparent;
-  color: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-.card-title {
-  margin: 0;
-  font-size: 0.9rem;
-  font-weight: 600;
-  line-height: 1.4;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-.card-subtitle {
-  margin: 4px 0 0;
-  color: #8b94b8;
-  font-size: 0.76rem;
-  line-height: 1.35;
-  display: -webkit-box;
-  -webkit-line-clamp: 1;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-.card-del {
-  flex-shrink: 0;
-  width: 22px;
-  height: 22px;
-  margin: 0;
-  padding: 0;
-  border: none;
-  border-radius: 6px;
-  background: transparent;
-  color: #8b94b8;
-  font-size: 1.1rem;
-  line-height: 1;
-  cursor: pointer;
-}
-.card-del:hover {
-  background: #3a1824;
-  color: #ffb4b4;
-}
-.card-body {
-  display: block;
-  width: 100%;
-  margin: 0;
-  padding: 8px 10px 10px 34px;
-  border: none;
-  background: transparent;
-  color: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-.card-tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-.card-tag {
-  display: inline-block;
-  padding: 2px 7px;
-  background: #1c2440;
-  border-radius: 5px;
-  color: #9aa3c7;
-  font-size: 0.72rem;
-  line-height: 1.4;
-}
-.card-tag--bvid {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  color: #b8c0e0;
-}
-.card-tag--lan {
-  background: #243055;
-  color: #a8b8ff;
-}
-.card-footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-top: 8px;
-  gap: 8px;
-}
-.card-time {
-  color: #7a84a8;
-  font-size: 0.72rem;
-}
-.card-id {
-  color: #5c668a;
-  font-size: 0.68rem;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-}
 .main {
   flex: 1;
-  max-width: 900px;
+  min-width: 0;
   padding: 24px 20px 48px;
   overflow-y: auto;
 }
@@ -784,11 +1046,13 @@ body {
     flex-direction: column;
   }
   .sidebar {
-    width: 100%;
+    width: 100% !important;
     height: auto;
     max-height: 42vh;
-    border-right: none;
     border-bottom: 1px solid #252b48;
+  }
+  .sidebar-resizer {
+    display: none;
   }
 }
 </style>

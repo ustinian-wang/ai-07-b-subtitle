@@ -9,6 +9,7 @@ class SubtitleExtractRequest(BaseModel):
     lang: str | None = Field(None, description="优先字幕语言，如 zh-CN / ai-zh")
     save: bool = Field(True, description="提取成功后自动保存到本地库")
     force: bool = Field(False, description="强制重新提取，忽略本地已有记录")
+    folder_id: str | None = Field(None, description="保存到指定文件夹，null 为未分类")
 
 
 class SubtitleLine(BaseModel):
@@ -46,6 +47,7 @@ class SubtitleExtractResponse(BaseModel):
 
 class SubtitleRecordSummary(BaseModel):
     id: str
+    folder_id: str | None = None
     bvid: str
     title: str
     page: int
@@ -91,6 +93,53 @@ class BatchDeleteResponse(BaseModel):
     ok: bool = True
     deleted: list[str] = []
     failed: list[str] = []
+
+
+class FolderCreateRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=80)
+    parent_id: str | None = None
+
+
+class FolderUpdateRequest(BaseModel):
+    name: str | None = Field(None, min_length=1, max_length=80)
+    parent_id: str | None = None
+
+
+class FolderPublic(BaseModel):
+    id: str
+    name: str
+    parent_id: str | None = None
+    created_at: str = ""
+    updated_at: str = ""
+
+
+class LibraryTreeFolder(BaseModel):
+    type: str = "folder"
+    id: str
+    name: str
+    parent_id: str | None = None
+    children: list["LibraryTreeFolder"] = []
+    records: list[SubtitleRecordSummary] = []
+
+
+class LibraryTreeResponse(BaseModel):
+    folders: list[LibraryTreeFolder]
+    uncategorized: list[SubtitleRecordSummary]
+    total_count: int = 0
+
+
+class BatchMoveRequest(BaseModel):
+    ids: list[str] = Field(..., min_length=1)
+    folder_id: str | None = Field(None, description="目标文件夹，null 为未分类")
+
+
+class BatchMoveResponse(BaseModel):
+    ok: bool = True
+    moved: list[str] = []
+    failed: list[str] = []
+
+
+LibraryTreeFolder.model_rebuild()
 
 
 class SettingsPublic(BaseModel):

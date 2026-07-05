@@ -89,9 +89,14 @@ def save_record(payload: dict[str, Any]) -> dict[str, Any]:
     now = _now_iso()
     track = payload.get("selected_track") or {}
     lan = (track.get("lan") or track.get("lan_doc") or "").strip()
+    existing = _read_file(_record_path(record_id)) if str(payload.get("id") or "").strip() else None
+    folder_id = payload.get("folder_id")
+    if folder_id is None and existing:
+        folder_id = existing.get("folder_id")
     record = {
         "id": record_id,
         "dedupe_key": make_dedupe_key(payload.get("bvid") or "", int(payload.get("page") or 1), lan),
+        "folder_id": folder_id,
         "source_url": payload.get("source_url") or "",
         "bvid": payload.get("bvid") or "",
         "aid": int(payload.get("aid") or 0),
@@ -103,7 +108,7 @@ def save_record(payload: dict[str, Any]) -> dict[str, Any]:
         "lines": payload.get("lines") or [],
         "text": payload.get("text") or "",
         "line_count": len(payload.get("lines") or []),
-        "created_at": payload.get("created_at") or now,
+        "created_at": payload.get("created_at") or (existing or {}).get("created_at") or now,
         "updated_at": now,
     }
     _record_path(record_id).write_text(
@@ -132,6 +137,34 @@ def delete_record(record_id: str) -> bool:
         return False
     path.unlink()
     return True
+
+
+def move_records_to_folder(record_ids: list[str], folder_id: str | None) -> dict[str, list[str]]:
+    moved: list[str] = []
+    failed: list[str] = []
+    for rid in record_ids:
+        path = _record_path(rid)
+        rec = _read_file(path)
+        if not rec:
+            failed.append(rid)
+            continue
+        rec["folder_id"] = folder_id
+        rec["updated_at"] = _now_iso()
+        path.write_text(json.dumps(rec, ensure_ascii=False, indent=2), encoding="utf-8")
+        moved.append(rid)
+    return {"moved": moved, "failed": failed}
+
+
+def move_records_on_folder_delete(folder_id: str, target_folder_id: str | None) -> int:
+    count = 0
+    for path in _records_dir().glob("*.json"):
+        rec = _read_file(path)
+        if rec and rec.get("folder_id") == folder_id:
+            rec["folder_id"] = target_folder_id
+            rec["updated_at"] = _now_iso()
+            path.write_text(json.dumps(rec, ensure_ascii=False, indent=2), encoding="utf-8")
+            count += 1
+    return count
 
 
 def delete_records(record_ids: list[str]) -> dict[str, list[str]]:
@@ -187,10 +220,48 @@ def _read_file(path: Path) -> dict[str, Any] | None:
     return raw
 
 
+def build_library_tree() -> dict[str, Any]:
+    from app.services.folder_store import list_folders
+
+    folders = list_folders()
+    records = list_records()
+    by_folder: dict[str | None, list[dict[str, Any]]] = {}
+    for rec in records:
+        by_folder.setdefault(rec.get("folder_id"), []).append(rec)
+
+    def sort_records(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        return sorted(items, key=lambda x: x.get("updated_at") or "", reverse=True)
+
+    def folder_nodes(parent_id: str | None) -> list[dict[str, Any]]:
+        nodes: list[dict[str, Any]] = []
+        children = [f for f in folders if f.get("parent_id") == parent_id]
+        children.sort(key=lambda x: (x.get("name") or "").lower())
+        for folder in children:
+            fid = folder["id"]
+            nodes.append(
+                {
+                    "type": "folder",
+                    "id": fid,
+                    "name": folder.get("name") or "",
+                    "parent_id": folder.get("parent_id"),
+                    "children": folder_nodes(fid),
+                    "records": sort_records(by_folder.get(fid, [])),
+                }
+            )
+        return nodes
+
+    return {
+        "folders": folder_nodes(None),
+        "uncategorized": sort_records(by_folder.get(None, [])),
+        "total_count": len(records),
+    }
+
+
 def _summary(rec: dict[str, Any]) -> dict[str, Any]:
     track = rec.get("selected_track") or {}
     return {
         "id": rec.get("id") or "",
+        "folder_id": rec.get("folder_id"),
         "bvid": rec.get("bvid") or "",
         "title": rec.get("title") or "",
         "page": rec.get("page") or 1,

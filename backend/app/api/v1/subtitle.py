@@ -7,6 +7,12 @@ from app.models.schemas import (
     BatchExportRequest,
     BatchExportResponse,
     BatchIdsRequest,
+    BatchMoveRequest,
+    BatchMoveResponse,
+    FolderCreateRequest,
+    FolderPublic,
+    FolderUpdateRequest,
+    LibraryTreeResponse,
     SubtitleExtractRequest,
     SubtitleExtractResponse,
     SubtitleLine,
@@ -15,13 +21,23 @@ from app.models.schemas import (
     SubtitleTrack,
 )
 from app.services.bilibili import BilibiliError, fetch_subtitles, format_subtitle_text, parse_bilibili_ref
+from app.services.folder_store import (
+    create_folder,
+    delete_folder,
+    descendant_folder_ids,
+    get_folder,
+    update_folder,
+)
 from app.services.subtitle_store import (
+    build_library_tree,
     delete_records,
     export_records,
     find_by_bvid_page,
     find_by_dedupe_key,
     get_record,
     list_records,
+    move_records_on_folder_delete,
+    move_records_to_folder,
     upsert_record,
 )
 
@@ -168,7 +184,10 @@ def extract_subtitle(body: SubtitleExtractRequest) -> SubtitleExtractResponse:
     resp = _build_response(result, source_url=source_url)
 
     # ponytail: 提取成功即落盘，与前端「自动保存」一致
-    saved = upsert_record(_payload_from_response(resp))
+    payload = _payload_from_response(resp)
+    if body.folder_id is not None or body.force:
+        payload["folder_id"] = body.folder_id
+    saved = upsert_record(payload)
     resp.record_id = saved["id"]
 
     return resp
@@ -198,6 +217,69 @@ def save_subtitle(body: SubtitleSaveRequest) -> SubtitleRecordSummary:
 @router.get("/records", response_model=list[SubtitleRecordSummary])
 def list_subtitle_records() -> list[SubtitleRecordSummary]:
     return [SubtitleRecordSummary.model_validate(x) for x in list_records()]
+
+
+@router.get("/records", response_model=list[SubtitleRecordSummary])
+def list_subtitle_records() -> list[SubtitleRecordSummary]:
+    return [SubtitleRecordSummary.model_validate(x) for x in list_records()]
+
+
+@router.get("/tree", response_model=LibraryTreeResponse)
+def get_library_tree() -> LibraryTreeResponse:
+    return LibraryTreeResponse.model_validate(build_library_tree())
+
+
+@router.post("/folders", response_model=FolderPublic)
+def create_subtitle_folder(body: FolderCreateRequest) -> FolderPublic:
+    try:
+        if body.parent_id and not get_folder(body.parent_id):
+            raise HTTPException(status_code=400, detail="父文件夹不存在")
+        return FolderPublic.model_validate(create_folder(body.name, body.parent_id))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.patch("/folders/{folder_id}", response_model=FolderPublic)
+def update_subtitle_folder(folder_id: str, body: FolderUpdateRequest) -> FolderPublic:
+    if not get_folder(folder_id):
+        raise HTTPException(status_code=404, detail="文件夹不存在")
+    try:
+        kwargs: dict = {}
+        if body.name is not None:
+            kwargs["name"] = body.name
+        if "parent_id" in body.model_fields_set:
+            kwargs["parent_id"] = body.parent_id
+        return FolderPublic.model_validate(update_folder(folder_id, **kwargs))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.delete("/folders/{folder_id}")
+def remove_subtitle_folder(folder_id: str) -> dict:
+    item = get_folder(folder_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="文件夹不存在")
+    parent_id = item.get("parent_id")
+    removed_ids = {folder_id, *descendant_folder_ids(folder_id)}
+    for fid in removed_ids:
+        move_records_on_folder_delete(fid, parent_id)
+    try:
+        result = delete_folder(folder_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"ok": True, **result}
+
+
+@router.post("/records/batch-move", response_model=BatchMoveResponse)
+def batch_move_records(body: BatchMoveRequest) -> BatchMoveResponse:
+    if body.folder_id and not get_folder(body.folder_id):
+        raise HTTPException(status_code=400, detail="目标文件夹不存在")
+    result = move_records_to_folder(body.ids, body.folder_id)
+    return BatchMoveResponse(
+        ok=not result["failed"] or bool(result["moved"]),
+        moved=result["moved"],
+        failed=result["failed"],
+    )
 
 
 @router.get("/records/{record_id}", response_model=SubtitleExtractResponse)
@@ -258,12 +340,28 @@ def _api_self_check() -> None:
 
     dup = client.post(
         "/api/v1/subtitle/extract",
-        json={"url": "https://www.bilibili.com/video/BV1test00001", "page": 1, "save": False},
+        json={"url": "https://www.bilibili.com/video/BV1test00001", "page": 1},
     )
     assert dup.status_code == 200
     body = dup.json()
     assert body["duplicate"] is True
     assert body["existing_record_id"] == rid
+
+    tree = client.get("/api/v1/subtitle/tree")
+    assert tree.status_code == 200
+    assert tree.json()["total_count"] >= 1
+
+    folder = client.post("/api/v1/subtitle/folders", json={"name": "API测试夹"})
+    assert folder.status_code == 200
+    fid = folder.json()["id"]
+    moved = client.post(
+        "/api/v1/subtitle/records/batch-move",
+        json={"ids": [rid], "folder_id": fid},
+    )
+    assert moved.status_code == 200
+    assert rid in moved.json()["moved"]
+
+    client.delete(f"/api/v1/subtitle/folders/{fid}")
 
     exported = client.post(
         "/api/v1/subtitle/records/batch-export",
