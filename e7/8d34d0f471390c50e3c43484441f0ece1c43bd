@@ -1,0 +1,61 @@
+backend/.env.example
+  s_494438b44b9e5c::t_8e74cc1e7f1e72 1-2
+backend/app/main.py
+  s_494438b44b9e5c::t_a32a904793f5b0 8,11-12
+backend/app/api/v1/__init__.py
+  s_494438b44b9e5c::t_ce526625598968 1
+backend/app/models/schemas.py
+  s_494438b44b9e5c::t_167ec512fee105 1-9,11-39
+  s_494438b44b9e5c::t_d915b374fe8311 10
+  s_494438b44b9e5c::t_6f828958e276b1 40-67
+backend/app/services/subtitle_store.py
+  s_494438b44b9e5c::t_5dfa0ccd780443 1-127
+backend/app/config.py
+  s_494438b44b9e5c::t_c0b375bdfedb8c 19
+.gitignore
+  s_494438b44b9e5c::t_2270fa29faaed9 5
+backend/app/services/bilibili.py
+  s_494438b44b9e5c::t_018235ceef1130 177-179
+  s_494438b44b9e5c::t_bf55ea96421bec 229,231-234,236-237
+  s_494438b44b9e5c::t_6dcfef3a23e1cf 1-176,180-228,230,235,238-276
+README.md
+  s_494438b44b9e5c::t_5ca0027f8689f7 32-34
+  s_494438b44b9e5c::t_cf1db485755b7f 40
+  s_494438b44b9e5c::t_3ecf1cdc26a06f 12
+  s_494438b44b9e5c::t_0dc63f29c06343 3-11,13-15,23,28,31,35-39,41
+frontend/index.html
+  s_494438b44b9e5c::t_cf636fbe5796ed 6
+backend/app/services/__init__.py
+  s_494438b44b9e5c::t_739b44fccc7db5 1
+backend/app/models/__init__.py
+  s_494438b44b9e5c::t_52eb9e3181374f 1
+backend/app/api/v1/subtitle.py
+  s_494438b44b9e5c::t_1e89169eb31d5f 1-8,11-13,15-18,25-34,38-53,148
+  s_494438b44b9e5c::t_1adde7cfb563d9 9-10,14,19-24,35-37,54-147,149-155
+frontend/src/App.vue
+  s_494438b44b9e5c::t_64417f8e40cdcf 24,30,41,53,56,68,75,95-97,99,101-102,104,106,111,121,125,127-135,141-147,152-155,226-239,247,276-280,283,285,325-327,329-360,368-376,381,387-425,427-434,436,439-442
+  s_494438b44b9e5c::t_1c75202637cc16 2-23,25-29,31-40,42-52,54-55,57-67,69-74,76-87,98,100,103,105,109,112-120,122-124,126,136-140,148-151,156-225,251-275,287-324,361-367,377-380,382-386,426,443-452
+  s_494438b44b9e5c::t_d14a2271c39e33 110
+backend/requirements.txt
+  s_494438b44b9e5c::t_71002aca481171 5
+backend/app/api/__init__.py
+  s_494438b44b9e5c::t_1d848405ab6f5b 1
+frontend/package-lock.json
+  s_494438b44b9e5c::t_bb9b9ec932bf3f 1-1207
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "e78d34d0f471390c50e3c43484441f0ece1c43bd",
+  "prompts": {},
+  "sessions": {
+    "s_494438b44b9e5c": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "72812374-9fa8-4ff5-909a-110ac9a87421",
+        "model": "default"
+      },
+      "human_author": "jser <87244899@qq.com>"
+    }
+  }
+}
