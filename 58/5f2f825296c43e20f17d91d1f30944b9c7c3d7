@@ -1,0 +1,62 @@
+frontend/src/TreeRecord.vue
+  s_dc07f15f72f4eb::t_ced8aca91e6dcf 75
+frontend/src/TreeFolder.vue
+  s_dc07f15f72f4eb::t_910d285dff0742 79
+  s_dc07f15f72f4eb::t_d5014cb782f5b2 155
+frontend/src/LibraryTree.vue
+  s_dc07f15f72f4eb::t_42455d658a7c77 128
+  s_dc07f15f72f4eb::t_ebd1c38ae32f32 49
+backend/app/services/chat_stream.py
+  s_dc07f15f72f4eb::t_3878dcd044beef 68
+  s_dc07f15f72f4eb::t_daec0f87516da6 13-14
+frontend/src/ChatPanel.vue
+  s_ff42db7d7ed9e9::t_ab115ef433211a 164-165
+  s_ff42db7d7ed9e9::t_115d3e0d254e05 337-342,349-360
+  s_dc07f15f72f4eb::t_c3dd2cbaa64bd6 17
+frontend/index.html
+  s_dc07f15f72f4eb::t_bf5f8da8a38034 6
+frontend/src/App.vue
+  s_dc07f15f72f4eb::t_d035ab2d29c624 819
+  s_dc07f15f72f4eb::t_bc8badef5e704e 133-134
+  s_dc07f15f72f4eb::t_885d7eb3017208 846
+  s_dc07f15f72f4eb::t_2860826ca06520 58
+  s_dc07f15f72f4eb::t_bf7f6bebefd922 126
+  s_dc07f15f72f4eb::t_754badc5b365d1 15
+  s_dc07f15f72f4eb::t_6642c5d0fb3983 723
+  s_dc07f15f72f4eb::t_fa40a439bb58c4 139
+  s_dc07f15f72f4eb::t_ab91bef181deae 144
+  s_dc07f15f72f4eb::t_818f43e17dd6a9 841
+README.md
+  s_dc07f15f72f4eb::t_0a39f4dfff9f4f 3,5
+  s_dc07f15f72f4eb::t_17f9f3165f40e2 14,16-17
+  s_dc07f15f72f4eb::t_59be9d8b92f416 203
+  s_dc07f15f72f4eb::t_46f7007162f3e5 38
+  s_dc07f15f72f4eb::t_935f6adf1eade0 117,119,122,124-125
+  s_dc07f15f72f4eb::t_1a0ce53ddc714a 192
+  s_dc07f15f72f4eb::t_9ed78f2a8b9214 110
+  s_dc07f15f72f4eb::t_f4230c53ac210e 31
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "585f2f825296c43e20f17d91d1f30944b9c7c3d7",
+  "prompts": {},
+  "sessions": {
+    "s_dc07f15f72f4eb": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "b8e98b04-9ee5-49ca-a7d0-47f2fb491340",
+        "model": "default"
+      },
+      "human_author": "jser <87244899@qq.com>"
+    },
+    "s_ff42db7d7ed9e9": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "e0f3ccba-8870-4f0a-a802-b73d313681aa",
+        "model": "default"
+      },
+      "human_author": "jser <87244899@qq.com>"
+    }
+  }
+}
