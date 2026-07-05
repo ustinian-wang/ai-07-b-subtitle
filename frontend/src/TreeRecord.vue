@@ -20,12 +20,17 @@
     <button type="button" class="tree-record-main" @click="$emit('open')">
       <span class="tree-record-icon">{{ item.source === 'xiaohongshu' ? '📕' : '📄' }}</span>
       <span class="tree-record-body">
-        <span class="tree-record-title" :title="item.title || item.bvid || item.note_id">
-          {{ item.title || item.bvid || item.note_id }}
+        <span class="tree-record-title-row">
+          <span :class="['source-badge', item.source === 'xiaohongshu' ? 'source-badge--xhs' : 'source-badge--bili']">
+            {{ item.source === 'xiaohongshu' ? '小红书' : 'B站' }}
+          </span>
+          <span class="tree-record-title" :title="item.title || item.bvid || item.note_id">
+            {{ item.title || item.bvid || item.note_id }}
+          </span>
         </span>
         <span class="tree-record-meta">
           <template v-if="item.source === 'xiaohongshu'">
-            小红书 · {{ item.note_id || '—' }}
+            {{ item.note_id || '—' }}
             <span v-if="item.lan_doc"> · {{ item.lan_doc }}</span>
           </template>
           <template v-else>
@@ -136,7 +141,31 @@ export default {
   flex-direction: column;
   gap: 2px;
 }
+.tree-record-title-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  min-width: 0;
+}
+.source-badge {
+  flex-shrink: 0;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 0.62rem;
+  font-weight: 600;
+  line-height: 1.4;
+}
+.source-badge--bili {
+  background: #243055;
+  color: #a8b8ff;
+}
+.source-badge--xhs {
+  background: #3a1824;
+  color: #ffb4c8;
+}
 .tree-record-title {
+  flex: 1;
+  min-width: 0;
   font-size: 0.82rem;
   font-weight: 500;
   line-height: 1.35;

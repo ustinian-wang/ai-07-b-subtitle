@@ -1,29 +1,5 @@
 <template>
   <ul class="tree-root">
-    <li v-for="folder in folders" :key="folder.id" class="tree-branch">
-      <TreeFolder
-        :folder="folder"
-        :depth="0"
-        :expanded-ids="expandedIds"
-        :selected-ids="selectedIds"
-        :dragging-record-ids="draggingRecordIds"
-        :drop-target-id="dropTargetId"
-        :active-record-id="activeRecordId"
-        :active-folder-id="activeFolderId"
-        @toggle-expand="$emit('toggle-expand', $event)"
-        @select-folder="$emit('select-folder', $event)"
-        @folder-action="$emit('folder-action', $event)"
-        @open-record="$emit('open-record', $event)"
-        @toggle-select="$emit('toggle-select', $event)"
-        @remove-record="$emit('remove-record', $event)"
-        @record-drag-start="$emit('record-drag-start', $event)"
-        @record-drag-end="$emit('record-drag-end', $event)"
-        @folder-drag-over="$emit('folder-drag-over', $event)"
-        @folder-drag-leave="$emit('folder-drag-leave', $event)"
-        @folder-drop="$emit('folder-drop', $event)"
-      />
-    </li>
-
     <li class="tree-branch tree-branch--virtual">
       <div
         :class="[
@@ -69,6 +45,30 @@
         </li>
         <li v-if="!uncategorized.length" class="tree-empty">暂无记录 · 可拖入字幕</li>
       </ul>
+    </li>
+
+    <li v-for="folder in folders" :key="folder.id" class="tree-branch">
+      <TreeFolder
+        :folder="folder"
+        :depth="0"
+        :expanded-ids="expandedIds"
+        :selected-ids="selectedIds"
+        :dragging-record-ids="draggingRecordIds"
+        :drop-target-id="dropTargetId"
+        :active-record-id="activeRecordId"
+        :active-folder-id="activeFolderId"
+        @toggle-expand="$emit('toggle-expand', $event)"
+        @select-folder="$emit('select-folder', $event)"
+        @folder-action="$emit('folder-action', $event)"
+        @open-record="$emit('open-record', $event)"
+        @toggle-select="$emit('toggle-select', $event)"
+        @remove-record="$emit('remove-record', $event)"
+        @record-drag-start="$emit('record-drag-start', $event)"
+        @record-drag-end="$emit('record-drag-end', $event)"
+        @folder-drag-over="$emit('folder-drag-over', $event)"
+        @folder-drag-leave="$emit('folder-drag-leave', $event)"
+        @folder-drop="$emit('folder-drop', $event)"
+      />
     </li>
   </ul>
 </template>

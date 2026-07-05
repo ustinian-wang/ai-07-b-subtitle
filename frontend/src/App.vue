@@ -12,19 +12,24 @@
 
     <SettingsPage v-if="view === 'settings'" @back="view = 'main'" />
 
-    <div v-else class="layout" :class="{ 'layout--resizing': resizingSidebar }">
+    <div
+      v-else
+      class="layout"
+      :class="{
+        'layout--resizing-sidebar': resizingSidebar,
+        'layout--resizing-chat': resizingChat,
+      }"
+    >
     <aside class="sidebar" :style="{ width: `${sidebarWidth}px` }">
       <div class="sidebar-head">
-        <h2>字幕库</h2>
+        <h2>字幕库<span v-if="tree.total_count" class="lib-count"> · {{ tree.total_count }} 条</span></h2>
         <div class="sidebar-head-actions">
           <button class="btn tiny" title="新建根文件夹" @click="createFolder(null)">+ 文件夹</button>
           <button class="btn tiny" @click="loadTree">刷新</button>
         </div>
       </div>
 
-      <p v-if="activeFolderLabel" class="save-target">
-        新提取保存到：<strong>{{ activeFolderLabel }}</strong>
-      </p>
+      <p class="save-hint">新提取默认保存到「未分类」，可拖拽或批量移动到文件夹</p>
 
       <div v-if="allRecordIds.length" class="batch-bar">
         <label class="check">
@@ -107,7 +112,8 @@
       @mousedown="startSidebarResize"
     />
 
-    <main class="main">
+    <div class="workspace">
+    <main class="main extract-pane">
       <header class="head">
         <h1>内容提取</h1>
         <p class="hint">粘贴 B 站视频或小红书笔记链接，提取后自动保存到左侧内容库</p>
@@ -206,6 +212,21 @@
         <pre class="pre">{{ result.text }}</pre>
       </section>
     </main>
+
+    <div
+      class="chat-resizer"
+      title="拖拽调整对话区宽度"
+      @mousedown="startChatResize"
+    />
+
+    <ChatPanel
+      :width="chatWidth"
+      :current-record-id="result?.record_id || ''"
+      :current-record-title="result?.title || ''"
+      :selected-ids="selectedIds"
+      :record-map="recordMap"
+    />
+    </div>
     </div>
   </div>
 </template>
@@ -213,10 +234,11 @@
 <script>
 import SettingsPage from './SettingsPage.vue';
 import LibraryTree from './LibraryTree.vue';
+import ChatPanel from './ChatPanel.vue';
 
 export default {
   name: 'App',
-  components: { SettingsPage, LibraryTree },
+  components: { SettingsPage, LibraryTree, ChatPanel },
   data() {
     return {
       view: 'main',
@@ -233,7 +255,9 @@ export default {
       savedTip: '',
       duplicatePrompt: null,
       sidebarWidth: 360,
+      chatWidth: 400,
       resizingSidebar: false,
+      resizingChat: false,
       draggingRecordIds: [],
       dropTargetFolderId: null,
       marquee: { active: false, startX: 0, startY: 0, x: 0, y: 0, w: 0, h: 0 },
@@ -257,11 +281,6 @@ export default {
     },
     someSelected() {
       return this.selectedIds.length > 0;
-    },
-    activeFolderLabel() {
-      if (this.activeFolderId === null) return '未分类';
-      const found = this.findFolder(this.tree.folders, this.activeFolderId);
-      return found ? found.name : '未分类';
     },
     marqueeStyle() {
       return {
@@ -300,17 +319,35 @@ export default {
     extractButtonLabel() {
       return this.urlPlatform === 'xiaohongshu' ? '提取笔记' : '提取字幕';
     },
+    recordMap() {
+      const map = {};
+      const collect = (records) => {
+        for (const r of records || []) map[r.id] = r;
+      };
+      const walk = (folders) => {
+        for (const f of folders || []) {
+          collect(f.records);
+          walk(f.children);
+        }
+      };
+      walk(this.tree.folders);
+      collect(this.tree.uncategorized);
+      return map;
+    },
   },
   mounted() {
     this.loadSidebarWidth();
+    this.loadChatWidth();
     this.loadTree();
     this._onWindowResize = () => {
       this.sidebarWidth = this.clampSidebarWidth(this.sidebarWidth);
+      this.chatWidth = this.clampChatWidth(this.chatWidth);
     };
     window.addEventListener('resize', this._onWindowResize);
   },
   beforeUnmount() {
     this.stopSidebarResize();
+    this.stopChatResize();
     this.stopMarquee();
     this.onRecordDragEnd();
     if (this._onWindowResize) {
@@ -351,6 +388,43 @@ export default {
       document.removeEventListener('mouseup', this.stopSidebarResize);
       try {
         localStorage.setItem('b-subtitle-sidebar-width', String(this.sidebarWidth));
+      } catch {
+        /* ignore */
+      }
+    },
+    clampChatWidth(width) {
+      const max = Math.min(640, Math.floor(window.innerWidth * 0.45));
+      return Math.max(280, Math.min(max, width));
+    },
+    loadChatWidth() {
+      try {
+        const raw = localStorage.getItem('b-subtitle-chat-width');
+        const n = parseInt(raw, 10);
+        if (!Number.isNaN(n)) this.chatWidth = this.clampChatWidth(n);
+      } catch {
+        /* ponytail: localStorage 不可用时用默认宽度 */
+      }
+    },
+    startChatResize(event) {
+      if (window.matchMedia('(max-width: 860px)').matches) return;
+      event.preventDefault();
+      this.resizingChat = true;
+      this._chatResizeStartX = event.clientX;
+      this._chatResizeStartWidth = this.chatWidth;
+      document.addEventListener('mousemove', this.onChatResize);
+      document.addEventListener('mouseup', this.stopChatResize);
+    },
+    onChatResize(event) {
+      const delta = this._chatResizeStartX - event.clientX;
+      this.chatWidth = this.clampChatWidth(this._chatResizeStartWidth + delta);
+    },
+    stopChatResize() {
+      if (!this.resizingChat) return;
+      this.resizingChat = false;
+      document.removeEventListener('mousemove', this.onChatResize);
+      document.removeEventListener('mouseup', this.stopChatResize);
+      try {
+        localStorage.setItem('b-subtitle-chat-width', String(this.chatWidth));
       } catch {
         /* ignore */
       }
@@ -522,11 +596,29 @@ export default {
         this.tree = resp.ok
           ? await resp.json()
           : { folders: [], uncategorized: [], total_count: 0 };
+        this.autoExpandFoldersWithRecords();
         this.selectedIds = this.selectedIds.filter((id) => this.allRecordIds.includes(id));
       } catch {
         this.tree = { folders: [], uncategorized: [], total_count: 0 };
         this.selectedIds = [];
       }
+    },
+    folderRecordCount(folder) {
+      let n = (folder.records || []).length;
+      for (const c of folder.children || []) n += this.folderRecordCount(c);
+      return n;
+    },
+    autoExpandFoldersWithRecords() {
+      const next = new Set(this.expandedIds);
+      next.add('__uncategorized__');
+      const walk = (folders) => {
+        for (const f of folders || []) {
+          if (this.folderRecordCount(f) > 0) next.add(f.id);
+          walk(f.children);
+        }
+      };
+      walk(this.tree.folders);
+      this.expandedIds = next;
     },
     toggleExpand(id) {
       const next = new Set(this.expandedIds);
@@ -654,7 +746,7 @@ export default {
             page: this.page || 1,
             save: true,
             force: !!force,
-            folder_id: this.activeFolderId,
+            folder_id: null,
           }),
         });
         const data = await resp.json();
@@ -849,7 +941,7 @@ body {
   transition: background 0.15s;
 }
 .sidebar-resizer:hover,
-.layout--resizing .sidebar-resizer {
+.layout--resizing-sidebar .sidebar-resizer {
   background: rgba(59, 91, 219, 0.25);
 }
 .sidebar-resizer::before {
@@ -862,12 +954,49 @@ body {
   transform: translateX(-50%);
   background: #252b48;
 }
-.layout--resizing {
+.layout--resizing-sidebar {
   cursor: col-resize;
   user-select: none;
 }
-.layout--resizing * {
+.layout--resizing-sidebar * {
   cursor: col-resize !important;
+}
+.layout--resizing-chat {
+  cursor: col-resize;
+  user-select: none;
+}
+.layout--resizing-chat * {
+  cursor: col-resize !important;
+}
+.workspace {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  height: 100vh;
+}
+.chat-resizer {
+  flex-shrink: 0;
+  width: 6px;
+  margin: 0 -3px;
+  cursor: col-resize;
+  position: relative;
+  z-index: 5;
+  background: transparent;
+  transition: background 0.15s;
+}
+.chat-resizer:hover,
+.layout--resizing-chat .chat-resizer {
+  background: rgba(59, 91, 219, 0.25);
+}
+.chat-resizer::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  transform: translateX(-50%);
+  background: #252b48;
 }
 .sidebar-head {
   display: flex;
@@ -880,6 +1009,15 @@ body {
 .sidebar-head-actions {
   display: flex;
   gap: 6px;
+  flex-shrink: 0;
+}
+.save-hint {
+  margin: 0 0 10px;
+  padding: 6px 10px;
+  background: #151a2e;
+  border-radius: 6px;
+  color: #8b94b8;
+  font-size: 0.78rem;
   flex-shrink: 0;
 }
 .save-target {
@@ -897,6 +1035,11 @@ body {
 .sidebar-head h2 {
   margin: 0;
   font-size: 1rem;
+}
+.lib-count {
+  color: #8b94b8;
+  font-weight: 400;
+  font-size: 0.82rem;
 }
 .batch-bar {
   margin-bottom: 12px;
@@ -962,6 +1105,8 @@ body {
   min-width: 0;
   padding: 24px 20px 48px;
   overflow-y: auto;
+  height: 100vh;
+  box-sizing: border-box;
 }
 .head h1 {
   margin: 0 0 6px;
@@ -1138,6 +1283,18 @@ body {
     border-bottom: 1px solid #252b48;
   }
   .sidebar-resizer {
+    display: none;
+  }
+  .workspace {
+    flex-direction: column;
+    height: auto;
+    min-height: 58vh;
+  }
+  .main {
+    height: auto;
+    min-height: 40vh;
+  }
+  .chat-resizer {
     display: none;
   }
 }

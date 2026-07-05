@@ -13,7 +13,8 @@
 - 自动优先选择中文字幕轨（`zh-cn` / `zh` / `ai-zh` 等）
 - **提取后自动保存**到本地字幕库（`backend/data/subtitles/*.json`）
 - **去重**：同一 `bvid + page + 字幕轨 lan` 仅一条；重复提取时提示，可查看已有或 `force: true` 强制重拉
-- **字幕库侧栏**：目录树（文件夹 + 字幕文件）、折叠展开、新建/重命名/删除文件夹、批量移动/删除/复制/导出
+- **字幕库侧栏**：目录树（未分类置顶、有内容的文件夹自动展开）、每条记录标注来源（B站 / 小红书）
+- **右侧对话助手**：ChatGPT 式流式对话，可引用当前提取结果或库内选中记录作为上下文
 - **设置页**（右上角）：B 站 **SESSDATA**、小红书 **Cookie**
 - **开发热更**：`scripts/dev.sh dev` 或 `uvicorn --reload` + Vite HMR
 
@@ -23,17 +24,19 @@
 ai-07-b-subtitle/
 ├── backend/
 │   ├── app/
-│   │   ├── api/v1/          # subtitle、settings 路由
-│   │   ├── services/        # bilibili 抓取、subtitle_store、settings_store
+│   │   ├── api/v1/          # subtitle、settings、chat 路由
+│   │   ├── services/        # bilibili/xiaohongshu 抓取、subtitle_store、chat_store
 │   │   └── models/          # Pydantic schemas
 │   ├── data/                # 本地数据（.gitignore，不入库）
 │   │   ├── subtitles/       # 字幕记录 *.json
 │   │   ├── folders.json     # 文件夹树
+│   │   ├── chat_sessions/   # 对话会话 *.json
 │   │   └── settings.json    # SESSDATA 等
 │   ├── .env.example
 │   └── requirements.txt
 ├── frontend/
-│   ├── src/App.vue          # 主界面 + 字幕库侧栏
+│   ├── src/App.vue          # 主界面 + 字幕库侧栏 + 对话面板
+│   ├── src/ChatPanel.vue    # 右侧对话助手
 │   └── src/SettingsPage.vue # 设置页
 ├── scripts/dev.sh           # start | stop | restart | dev | status
 └── README.md
@@ -85,6 +88,18 @@ npm install && npm run dev -- --host 0.0.0.0 --port 9177
 
 获取 Cookie：浏览器登录对应站点 → F12 → Application → Cookies。
 
+## 配置：对话 LLM（OpenAI 兼容）
+
+右侧对话助手需 OpenAI 兼容 API，在 `backend/.env` 配置：
+
+| 变量 | 说明 | 默认 |
+|------|------|------|
+| `OPENAI_API_KEY` | API Key（必填） | — |
+| `OPENAI_BASE_URL` | 兼容端点 | `https://api.openai.com/v1` |
+| `OPENAI_MODEL` | 模型名 | `gpt-4o-mini` |
+
+引用库内记录时，后端会把对应 `text` 注入 system prompt（单条最多 12000 字符）。
+
 ## 主要 API
 
 | 方法 | 路径 | 说明 |
@@ -104,6 +119,10 @@ npm install && npm run dev -- --host 0.0.0.0 --port 9177
 | POST | `/api/v1/subtitle/records/batch-export` | 批量导出，`{"ids":[...],"format":"txt"\|"json"}` |
 | GET | `/api/v1/settings` | 读取设置（SESSDATA 脱敏） |
 | PATCH | `/api/v1/settings` | 更新设置，`{"bilibili_sessdata":"..."}`，空字符串可清除 |
+| POST | `/api/v1/chat/sessions` | 新建对话会话，返回 `thread_id` |
+| GET | `/api/v1/chat/messages?thread_id=…` | 读取会话历史 |
+| DELETE | `/api/v1/chat/messages?thread_id=…` | 清空会话 |
+| POST | `/api/v1/chat/stream` | SSE 流式对话，见下 |
 
 ### 提取 `POST /api/v1/subtitle/extract`
 
@@ -137,18 +156,31 @@ B 站示例：
 | `page` | 分 P 序号，默认 1 |
 | `lang` | 可选，优先字幕语言，如 `zh-CN` |
 | `force` | `true` 时忽略本地去重，重新请求 B 站并 upsert |
-| `folder_id` | 保存到指定文件夹；`null` 为未分类。选中侧栏文件夹后前端会自动带上 |
+| `folder_id` | 可选，保存到指定文件夹；省略或 `null` 为未分类（前端提取默认未分类） |
 
 **去重命中**时返回 `duplicate: true`、`existing_record_id`，不调用 B 站 API；前端会提示「直接查看」或「重新提取」。
 
 **成功提取**时自动 upsert 到 `data/subtitles/`，响应含 `record_id`、`lines`、`text`（带时间轴纯文本）。
 
+### 对话 `POST /api/v1/chat/stream`
+
+```json
+{
+  "thread_id": "abc123",
+  "message": "总结这篇笔记的要点",
+  "reference_record_ids": ["record_id_1", "record_id_2"]
+}
+```
+
+SSE 响应：`data: {"delta":"…"}` 流式片段 → `data: {"done":true}` 结束；错误时 `data: {"error":"…"}`。
+
 ## 数据持久化
 
 | 路径 | 内容 |
 |------|------|
-| `backend/data/subtitles/{id}.json` | 单条字幕：bvid、title、lines、text、**folder_id**、dedupe_key、时间戳等 |
+| `backend/data/subtitles/{id}.json` | 单条记录：`source`（`bilibili` / `xiaohongshu`）、title、lines/text、**folder_id** 等 |
 | `backend/data/folders.json` | 文件夹树：`{ id, name, parent_id }` |
+| `backend/data/chat_sessions/{thread_id}.json` | 对话历史 |
 | `backend/data/settings.json` | 应用设置（当前仅 `bilibili_sessdata`） |
 
 - **去重键**：`{bvid}_p{page}_{lan}`，同键 upsert 更新而非新建文件
@@ -156,7 +188,8 @@ B 站示例：
 
 ## 技术说明
 
-- **无 LLM**：`httpx` 调 B 站 / 小红书 Web API（小红书：edith feed + `__INITIAL_STATE__` 回退）
+- **B 站 / 小红书抓取**：`httpx` 调 Web API（小红书：edith feed + `__INITIAL_STATE__` 回退）
+- **对话**：OpenAI 兼容 SSE，`reference_record_ids` 注入库内内容
 - **WBI 签名**：player 接口需 nav 接口提供的 img/sub key 签名
 - **代理**：前端 Vite 将 `/api` 代理到 `http://127.0.0.1:8907`（见 `frontend/vite.config.js`）
 
@@ -166,6 +199,7 @@ B 站示例：
 cd backend && source .venv/bin/activate
 python -m app.services.bilibili      # URL 解析、时间格式
 python -m app.services.subtitle_store
+python -m app.services.chat_store
 python -m app.api.v1.subtitle        # TestClient 冒烟（含去重、批量导出）
 ```
 

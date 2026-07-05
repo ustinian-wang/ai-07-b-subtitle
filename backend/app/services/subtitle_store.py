@@ -39,8 +39,28 @@ def make_xhs_dedupe_key(note_id: str) -> str:
     return f"xhs_{safe}"
 
 
+def infer_source(raw: dict[str, Any]) -> str:
+    """老记录可能没有 source 字段，从其它字段推断。"""
+    source = (raw.get("source") or "").strip()
+    if source in ("bilibili", "xiaohongshu"):
+        return source
+    dedupe = raw.get("dedupe_key") or ""
+    if str(dedupe).startswith("xhs_"):
+        return "xiaohongshu"
+    note_id = (raw.get("note_id") or "").strip()
+    bvid = (raw.get("bvid") or "").strip()
+    if note_id and not bvid:
+        return "xiaohongshu"
+    url = (raw.get("source_url") or "").lower()
+    if any(x in url for x in ("xiaohongshu.com", "xhslink.com", "xhs.cn")):
+        return "xiaohongshu"
+    if (raw.get("tags") or raw.get("images")) and not (raw.get("lines") or []):
+        return "xiaohongshu"
+    return "bilibili"
+
+
 def record_dedupe_key(rec: dict[str, Any]) -> str:
-    source = rec.get("source") or "bilibili"
+    source = infer_source(rec)
     if source == "xiaohongshu":
         return make_xhs_dedupe_key(rec.get("note_id") or rec.get("bvid") or "")
     return rec.get("dedupe_key") or make_dedupe_key(
@@ -97,7 +117,7 @@ def _pick_existing_record(records: list[dict[str, Any]], lang: str | None) -> di
 
 
 def upsert_record(payload: dict[str, Any]) -> dict[str, Any]:
-    source = payload.get("source") or "bilibili"
+    source = payload.get("source") or infer_source(payload)
     if source == "xiaohongshu":
         note_id = payload.get("note_id") or ""
         existing = find_by_xhs_note_id(note_id)
@@ -115,12 +135,11 @@ def upsert_record(payload: dict[str, Any]) -> dict[str, Any]:
 def save_record(payload: dict[str, Any]) -> dict[str, Any]:
     record_id = str(payload.get("id") or "").strip() or uuid.uuid4().hex[:12]
     now = _now_iso()
-    source = payload.get("source") or "bilibili"
     track = payload.get("selected_track") or {}
     lan = (track.get("lan") or track.get("lan_doc") or "").strip()
     existing = _read_file(_record_path(record_id)) if str(payload.get("id") or "").strip() else None
-    if not source and existing:
-        source = existing.get("source") or "bilibili"
+    merged = {**(existing or {}), **payload}
+    source = payload.get("source") or infer_source(merged)
     folder_id = payload.get("folder_id")
     if folder_id is None and existing:
         folder_id = existing.get("folder_id")
@@ -263,12 +282,24 @@ def _read_file(path: Path) -> dict[str, Any] | None:
     if not isinstance(raw, dict):
         return None
     raw.setdefault("id", path.stem)
-    raw.setdefault("source", "bilibili")
+    if "source" not in raw:
+        raw["source"] = infer_source(raw)
+        _maybe_persist_source(path, raw)
+    else:
+        raw["source"] = infer_source(raw)
     if (raw.get("source") or "bilibili") == "xiaohongshu":
         raw["line_count"] = len(raw.get("tags") or [])
     else:
         raw["line_count"] = len(raw.get("lines") or [])
     return raw
+
+
+def _maybe_persist_source(path: Path, raw: dict[str, Any]) -> None:
+    """老 JSON 缺 source 时补写一次，避免每次读取重复推断。"""
+    try:
+        path.write_text(json.dumps(raw, ensure_ascii=False, indent=2), encoding="utf-8")
+    except OSError:
+        pass
 
 
 def build_library_tree() -> dict[str, Any]:
@@ -310,7 +341,7 @@ def build_library_tree() -> dict[str, Any]:
 
 def _summary(rec: dict[str, Any]) -> dict[str, Any]:
     track = rec.get("selected_track") or {}
-    source = rec.get("source") or "bilibili"
+    source = infer_source(rec)
     if source == "xiaohongshu":
         note_type = rec.get("note_type") or "normal"
         lan_doc = "视频" if note_type == "video" else "图文"
@@ -349,6 +380,7 @@ def _self_check() -> None:
         }
     )
     assert get_record(rid)["title"] == "测试"
+    assert saved["source"] == "bilibili"
     assert saved["dedupe_key"] == make_dedupe_key("BVtest", 1, "zh-CN")
     assert find_by_dedupe_key("BVtest", 1, "zh-CN")["id"] == rid
     assert any(x["id"] == rid for x in list_records())
@@ -387,6 +419,10 @@ def _self_check() -> None:
     )["id"]
     assert find_by_xhs_note_id(xhs_id)["id"] == xhs_rid
     delete_records([xhs_rid])
+
+    assert infer_source({"dedupe_key": "xhs_abc", "note_id": "abc"}) == "xiaohongshu"
+    assert infer_source({"bvid": "BV1", "lines": [{}]}) == "bilibili"
+    assert infer_source({"source": "xiaohongshu", "note_id": "n1"}) == "xiaohongshu"
 
 
 if __name__ == "__main__":

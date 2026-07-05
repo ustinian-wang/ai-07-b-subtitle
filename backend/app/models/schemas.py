@@ -166,3 +166,28 @@ class SettingsPublic(BaseModel):
 class SettingsPatchRequest(BaseModel):
     bilibili_sessdata: str | None = None
     xiaohongshu_cookie: str | None = None
+
+
+class ChatRequest(BaseModel):
+    thread_id: str = ""
+    message: str = Field(..., min_length=1)
+    reference_record_ids: list[str] = Field(default_factory=list)
+
+
+class ChatMessage(BaseModel):
+    role: str
+    content: str
+
+
+class ChatMessagesResponse(BaseModel):
+    thread_id: str
+    messages: list[ChatMessage] = Field(default_factory=list)
+
+
+class ChatSessionResponse(BaseModel):
+    thread_id: str
+
+
+class ChatClearResponse(BaseModel):
+    ok: bool = True
+    thread_id: str = ""

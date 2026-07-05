@@ -73,8 +73,12 @@ do_start() {
   do_stop
   sleep 0.5
 
-  # shellcheck disable=SC2046
-  nohup "$ROOT/backend/.venv/bin/uvicorn" $(uvicorn_args) >"$LOG_DIR/backend.log" 2>&1 &
+  local reload_args=()
+  if [ "$UVICORN_RELOAD" = "1" ]; then
+    reload_args=(--reload --reload-dir "$ROOT/backend/app")
+  fi
+  nohup bash -c "cd '$ROOT/backend' && exec '$ROOT/backend/.venv/bin/uvicorn' app.main:app --host '$DEV_HOST' --port '$BACKEND_PORT' ${reload_args[*]}" \
+    >"$LOG_DIR/backend.log" 2>&1 &
   echo $! >"$BACKEND_PID"
 
   nohup bash -c "cd '$ROOT/frontend' && ./node_modules/.bin/vite --host '$DEV_HOST' --port '$VITE_PORT'" \

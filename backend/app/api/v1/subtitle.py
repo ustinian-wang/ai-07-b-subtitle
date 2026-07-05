@@ -37,6 +37,7 @@ from app.services.subtitle_store import (
     find_by_dedupe_key,
     find_by_xhs_note_id,
     get_record,
+    infer_source,
     list_records,
     move_records_on_folder_delete,
     move_records_to_folder,
@@ -126,7 +127,7 @@ def _response_from_record(
     source_url: str = "",
     duplicate: bool = False,
 ) -> SubtitleExtractResponse:
-    source = rec.get("source") or "bilibili"
+    source = infer_source(rec)
     track = rec.get("selected_track")
     selected = SubtitleTrack.model_validate(track) if track else None
     lines = [
