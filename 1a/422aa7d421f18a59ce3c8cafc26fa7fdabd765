@@ -1,0 +1,107 @@
+frontend/src/LibraryTree.vue
+  s_5392790fcca654::t_fcc4a959f47b1f 178
+  s_5392790fcca654::t_394b825fac7362 183-185
+  s_494438b44b9e5c::t_362d977ab4205f 49
+  s_5392790fcca654::t_52b8f92946bd31 12,14-15
+  s_5392790fcca654::t_f3f0da24857867 74
+  s_5392790fcca654::t_fecb64180d7781 109,112-135,142-143
+frontend/src/App.vue
+  s_5392790fcca654::t_96976bace29919 94
+  s_5392790fcca654::t_5201cb9b8c220c 555,557,562-568
+  s_494438b44b9e5c::t_87ca648c4d4879 841
+  s_494438b44b9e5c::t_1c1bbdab971726 723
+  s_762bf6a9779ec7::t_43317a21ae5095 244
+  s_494438b44b9e5c::t_8ea76556e19764 15
+  s_762bf6a9779ec7::t_10b3b2a9a90669 97-121
+  s_494438b44b9e5c::t_70d34dd6622a6c 126
+  s_494438b44b9e5c::t_cd5efba7d0e40d 134
+  s_5392790fcca654::t_e6e6dba6510d17 279
+  s_762bf6a9779ec7::t_8e43c79c75b33c 584
+  s_494438b44b9e5c::t_3809da31492439 778
+backend/app/services/folder_store.py
+  s_30d42f1b2e0719::t_8e289ef84b6287 1
+frontend/index.html
+  s_494438b44b9e5c::t_f0bc6b90b221fb 6
+frontend/src/TreeRecord.vue
+  s_494438b44b9e5c::t_db2a50eaf7fc3f 75
+README.md
+  s_494438b44b9e5c::t_d1e5aa086462a4 197
+  s_494438b44b9e5c::t_f31d204215d3a9 38
+  s_494438b44b9e5c::t_2a6a9238ff7944 31
+  s_494438b44b9e5c::t_ee29767e6c180a 3-5,11-12,14-18
+  s_494438b44b9e5c::t_78b354c1aca81b 119,122,124-125
+  s_494438b44b9e5c::t_155fad37460ef3 166-169,172
+  s_30d42f1b2e0719::t_a50fb898471f7f 174
+frontend/src/TreeFolder.vue
+  s_5392790fcca654::t_125a10bfd3453b 135-165,168-169,176-177
+  s_5392790fcca654::t_2cfdef4c5bcaf0 208-210
+  s_5392790fcca654::t_b532d9972aa904 12-14
+  s_494438b44b9e5c::t_e9a28d876513da 79
+  s_5392790fcca654::t_aa1385cbe1ff9b 60
+  s_5392790fcca654::t_a29cf5a3b090df 113
+  s_5392790fcca654::t_3f7682508ebe3f 203
+frontend/src/ChatPanel.vue
+  s_a20f89baa13077::t_35e9be0c264492 66-87,91-115
+  s_494438b44b9e5c::t_1e01964fd627f1 17
+  s_27e5e5efbcfd11::t_2605d7b0ab058f 268-300,302,304,306
+  s_a20f89baa13077::t_049d2a858b6fe9 369-403
+  s_27e5e5efbcfd11::t_b81349a3d5b3c0 438-442
+  s_a20f89baa13077::t_9eb1561ccd6733 818-850
+  s_a20f89baa13077::t_fda317586ef07e 195-196,199
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "1a422aa7d421f18a59ce3c8cafc26fa7fdabd765",
+  "prompts": {},
+  "sessions": {
+    "s_27e5e5efbcfd11": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "603ad0f4-81fb-4beb-9fd3-687d2534742b",
+        "model": "default"
+      },
+      "human_author": "jser <87244899@qq.com>"
+    },
+    "s_30d42f1b2e0719": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "68bfc6b4-7f74-40cc-94e9-64edb25e3456",
+        "model": "default"
+      },
+      "human_author": "jser <87244899@qq.com>"
+    },
+    "s_494438b44b9e5c": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "72812374-9fa8-4ff5-909a-110ac9a87421",
+        "model": "default"
+      },
+      "human_author": "jser <87244899@qq.com>"
+    },
+    "s_5392790fcca654": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "01f8fadf-4126-470a-a386-6f6978bf8edd",
+        "model": "default"
+      },
+      "human_author": "jser <87244899@qq.com>"
+    },
+    "s_762bf6a9779ec7": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "ecac0c5e-d7a0-4af3-9dd6-3f10c18edf74",
+        "model": "default"
+      },
+      "human_author": "jser <87244899@qq.com>"
+    },
+    "s_a20f89baa13077": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "0d405e31-0610-47b4-a0cc-19ef1136d4c1",
+        "model": "default"
+      },
+      "human_author": "jser <87244899@qq.com>"
+    }
+  }
+}
