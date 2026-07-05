@@ -1,4 +1,4 @@
-"""字幕库文件夹：本地 JSON 树形目录（单用户 demo）。"""
+"""内容库文件夹：本地 JSON 树形目录（单用户 demo）。"""
 from __future__ import annotations
 
 import json

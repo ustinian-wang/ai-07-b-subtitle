@@ -1,15 +1,5 @@
 <template>
   <div class="app-shell">
-    <button
-      v-if="view === 'main'"
-      type="button"
-      class="top-settings"
-      title="设置"
-      @click="view = 'settings'"
-    >
-      设置
-    </button>
-
     <SettingsPage v-if="view === 'settings'" @back="view = 'main'" />
 
     <div
@@ -22,7 +12,7 @@
     >
     <aside class="sidebar" :style="{ width: `${sidebarWidth}px` }">
       <div class="sidebar-head">
-        <h2>字幕库<span v-if="tree.total_count" class="lib-count"> · {{ tree.total_count }} 条</span></h2>
+        <h2>内容库<span v-if="tree.total_count" class="lib-count"> · {{ tree.total_count }} 条</span></h2>
         <div class="sidebar-head-actions">
           <button class="btn tiny" title="新建根文件夹" @click="createFolder(null)">+ 文件夹</button>
           <button class="btn tiny" @click="loadTree">刷新</button>
@@ -30,7 +20,6 @@
       </div>
 
       <p class="save-hint">新提取默认保存到「未分类」，可拖拽或批量移动到文件夹</p>
-
       <div v-if="allRecordIds.length" class="batch-bar">
         <label class="check">
           <input
@@ -102,13 +91,39 @@
           @folder-drag-over="onFolderDragOver"
           @folder-drag-leave="onFolderDragLeave"
           @folder-drop="onFolderDrop"
+          @folder-ref-drag-empty="onFolderRefDragEmpty"
         />
+      </div>
+
+      <div class="sidebar-footer">
+        <button
+          type="button"
+          class="sidebar-settings"
+          title="设置"
+          @click="view = 'settings'"
+        >
+          <svg class="sidebar-settings-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path
+              d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"
+              stroke="currentColor"
+              stroke-width="1.5"
+            />
+            <path
+              d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"
+              stroke="currentColor"
+              stroke-width="1.5"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+          </svg>
+          <span>设置</span>
+        </button>
       </div>
     </aside>
 
     <div
       class="sidebar-resizer"
-      title="拖拽调整字幕库宽度"
+      title="拖拽调整内容库宽度"
       @mousedown="startSidebarResize"
     />
 
@@ -116,7 +131,7 @@
     <main class="main extract-pane">
       <header class="head">
         <h1>内容提取</h1>
-        <p class="hint">粘贴 B 站视频或小红书笔记链接，提取后自动保存到左侧内容库</p>
+        <p class="hint">粘贴 B 站视频或小红书笔记链接，提取后自动保存到左侧内容库，右侧可对话分析</p>
       </header>
 
       <section v-if="duplicatePrompt" class="panel duplicate">
@@ -226,6 +241,7 @@
       :selected-ids="selectedIds"
       :record-map="recordMap"
       :all-records="allRecords"
+      @open-record="openRecord"
     />
     </div>
     </div>
@@ -260,6 +276,7 @@ export default {
       resizingSidebar: false,
       resizingChat: false,
       draggingRecordIds: [],
+      dragPurpose: null,
       dropTargetFolderId: null,
       marquee: { active: false, startX: 0, startY: 0, x: 0, y: 0, w: 0, h: 0 },
     };
@@ -535,12 +552,20 @@ export default {
       document.removeEventListener('mouseup', this.onMarqueeEnd);
       this._marqueePane = null;
     },
-    onRecordDragStart({ ids }) {
+    onRecordDragStart({ ids, purpose = 'move' }) {
       this.draggingRecordIds = ids;
+      this.dragPurpose = purpose;
     },
     onRecordDragEnd() {
       this.draggingRecordIds = [];
       this.dropTargetFolderId = null;
+      this.dragPurpose = null;
+    },
+    onFolderRefDragEmpty() {
+      this.savedTip = '文件夹为空';
+      setTimeout(() => {
+        if (this.savedTip === '文件夹为空') this.savedTip = '';
+      }, 2000);
     },
     onFolderDragOver(folderId) {
       this.dropTargetFolderId = folderId;
@@ -556,6 +581,7 @@ export default {
       }
     },
     async onFolderDrop(folderId) {
+      if (this.dragPurpose === 'ref') return;
       const ids = this.draggingRecordIds.length ? this.draggingRecordIds : [...this.selectedIds];
       const targetId = folderId === '__uncategorized__' ? null : folderId;
       await this.moveRecordsToFolder(ids, targetId);
@@ -694,7 +720,7 @@ export default {
         return;
       }
       if (action === 'delete') {
-        if (!window.confirm(`删除文件夹「${folder.name}」？内部字幕将移到上级或未分类。`)) return;
+        if (!window.confirm(`删除文件夹「${folder.name}」？内部内容将移到上级或未分类。`)) return;
         try {
           const resp = await fetch(`/api/v1/subtitle/folders/${folder.id}`, {
             method: 'DELETE',
@@ -749,7 +775,7 @@ export default {
       this.copied = false;
       this.savedTip = '';
       if (!this.url.trim()) {
-        this.error = '请输入 B 站视频链接';
+        this.error = '请输入 B 站或小红书链接';
         return;
       }
       this.loading = true;
@@ -812,7 +838,7 @@ export default {
       }
     },
     async removeRecord(id) {
-      if (!window.confirm('确定删除这条字幕记录？')) return;
+      if (!window.confirm('确定删除这条内容记录？')) return;
       await this._deleteIds([id]);
     },
     async batchDelete() {

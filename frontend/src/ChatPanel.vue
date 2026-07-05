@@ -14,7 +14,7 @@
         <p v-if="activeSessionTitle" class="chat-active-session" :title="activeSessionTitle">
           {{ activeSessionTitle }}
         </p>
-        <p v-else class="chat-sub">引用库内内容，像 ChatGPT 一样追问</p>
+        <p v-else class="chat-sub">引用内容库笔记，多轮对话分析</p>
       </div>
       <div class="chat-head-actions">
         <button
@@ -63,11 +63,56 @@
         :class="['chat-msg', m.role === 'user' ? 'chat-msg--user' : 'chat-msg--assistant']"
       >
         <div class="chat-role">{{ m.role === 'user' ? '你' : '助手' }}</div>
-        <div class="chat-bubble">{{ m.content }}</div>
+        <div class="chat-bubble">
+          <template v-for="(seg, si) in parseMessageContent(m.content)" :key="`${idx}-${si}`">
+            <span v-if="seg.type === 'text'" class="chat-text">{{ seg.text }}</span>
+            <button
+              v-else
+              type="button"
+              class="msg-ref"
+              :title="`打开笔记：${seg.displayTitle}`"
+              @click="onRefClick(seg.id)"
+            >
+              <span
+                :class="[
+                  'ref-source',
+                  seg.source === 'xiaohongshu' ? 'ref-source--xhs' : 'ref-source--bili',
+                ]"
+              >
+                {{ seg.source === 'xiaohongshu' ? '小红书' : 'B站' }}
+              </span>
+              <span class="ref-title">{{ seg.displayTitle }}</span>
+            </button>
+          </template>
+        </div>
       </article>
       <article v-if="streaming" class="chat-msg chat-msg--assistant">
         <div class="chat-role">助手</div>
-        <div class="chat-bubble chat-bubble--stream">{{ streamBuffer || '…' }}</div>
+        <div class="chat-bubble chat-bubble--stream">
+          <template v-if="streamBuffer">
+            <template v-for="(seg, si) in parseMessageContent(streamBuffer)" :key="`stream-${si}`">
+              <span v-if="seg.type === 'text'" class="chat-text">{{ seg.text }}</span>
+              <button
+                v-else
+                type="button"
+                class="msg-ref"
+                :title="`打开笔记：${seg.displayTitle}`"
+                @click="onRefClick(seg.id)"
+              >
+                <span
+                  :class="[
+                    'ref-source',
+                    seg.source === 'xiaohongshu' ? 'ref-source--xhs' : 'ref-source--bili',
+                  ]"
+                >
+                  {{ seg.source === 'xiaohongshu' ? '小红书' : 'B站' }}
+                </span>
+                <span class="ref-title">{{ seg.displayTitle }}</span>
+              </button>
+            </template>
+          </template>
+          <span v-else>…</span>
+        </div>
       </article>
     </div>
 
@@ -147,8 +192,11 @@
 const THREAD_KEY = 'b-subtitle-chat-thread';
 const DRAG_MIME = 'application/x-subtitle-ids';
 
+const MSG_REF_RE = /@\[([^\]]*)\]\(([^)]+)\)/g;
+
 export default {
   name: 'ChatPanel',
+  emits: ['open-record'],
   props: {
     width: { type: Number, default: 400 },
     currentRecordId: { type: String, default: '' },
@@ -217,13 +265,45 @@ export default {
       });
       return true;
     },
-    addRefsFromIds(ids) {
-      let added = 0;
-      for (const id of ids) {
-        const rec = this.recordMap[id];
-        if (this.addRef(id, rec?.title, rec?.source)) added += 1;
+    attachRecordAsMention(id, { at, after, focus = false } = {}) {
+      const rec = this.recordMap[id];
+      if (!rec) return false;
+      const title = this.mentionLabel(rec);
+      const insert = `@[${title}](${id})`;
+      this.addRef(id, title, rec.source);
+      if (at != null) {
+        const ta = this.$refs.inputRef;
+        const afterPos = after ?? ta?.selectionStart ?? this.draft.length;
+        const before = this.draft.slice(0, at);
+        const afterText = this.draft.slice(afterPos);
+        this.draft = `${before}${insert} ${afterText}`;
+        if (focus && ta) {
+          this.$nextTick(() => {
+            const pos = before.length + insert.length + 1;
+            ta.focus();
+            ta.setSelectionRange(pos, pos);
+          });
+        }
+      } else {
+        const prefix = this.draft.length && !/\s$/.test(this.draft) ? ' ' : '';
+        this.draft = `${this.draft}${prefix}${insert} `;
+        this.closeMention();
+        this.$nextTick(() => {
+          const ta = this.$refs.inputRef;
+          if (ta) {
+            ta.focus();
+            ta.setSelectionRange(this.draft.length, this.draft.length);
+          }
+        });
       }
-      if (added) this.showRefHint(`已引用 ${added} 条笔记`);
+      return true;
+    },
+    addRefsFromIds(ids) {
+      let attached = 0;
+      for (const id of ids) {
+        if (this.attachRecordAsMention(id)) attached += 1;
+      }
+      if (attached) this.showRefHint(`已引用 ${attached} 条笔记`);
       else if (ids.length) this.showRefHint('所选笔记已在引用中');
     },
     showRefHint(msg) {
@@ -286,6 +366,41 @@ export default {
         /* ponytail: 非法拖拽数据直接忽略 */
       }
     },
+    refMeta(id, fallbackTitle) {
+      const rec = this.recordMap[id];
+      return {
+        source: rec?.source || 'bilibili',
+        displayTitle: rec ? this.mentionLabel(rec) : fallbackTitle || id,
+      };
+    },
+    parseMessageContent(text) {
+      if (!text) return [{ type: 'text', text: '' }];
+      const segments = [];
+      let lastIndex = 0;
+      MSG_REF_RE.lastIndex = 0;
+      let match = MSG_REF_RE.exec(text);
+      while (match) {
+        if (match.index > lastIndex) {
+          segments.push({ type: 'text', text: text.slice(lastIndex, match.index) });
+        }
+        const id = match[2];
+        segments.push({
+          type: 'ref',
+          id,
+          ...this.refMeta(id, match[1]),
+        });
+        lastIndex = MSG_REF_RE.lastIndex;
+        match = MSG_REF_RE.exec(text);
+      }
+      if (lastIndex < text.length) {
+        segments.push({ type: 'text', text: text.slice(lastIndex) });
+      }
+      return segments.length ? segments : [{ type: 'text', text }];
+    },
+    onRefClick(id) {
+      if (!id) return;
+      this.$emit('open-record', id);
+    },
     mentionLabel(rec) {
       return rec.title || rec.bvid || rec.note_id || rec.id;
     },
@@ -320,18 +435,13 @@ export default {
       const ta = this.$refs.inputRef;
       if (!ta) return;
       const title = this.mentionLabel(record);
-      const insert = `@[${title}](${record.id})`;
-      const before = this.draft.slice(0, this.mention.start);
-      const after = this.draft.slice(ta.selectionStart);
-      this.draft = `${before}${insert} ${after}`;
-      this.addRef(record.id, title, record.source);
+      this.attachRecordAsMention(record.id, {
+        at: this.mention.start,
+        after: ta.selectionStart,
+        focus: true,
+      });
       this.showRefHint(`已 @ 引用：${title}`);
       this.closeMention();
-      this.$nextTick(() => {
-        const pos = before.length + insert.length + 1;
-        ta.focus();
-        ta.setSelectionRange(pos, pos);
-      });
     },
     formatSessionTime(iso) {
       if (!iso) return '';
@@ -704,6 +814,39 @@ export default {
 }
 .chat-bubble--stream {
   opacity: 0.95;
+}
+.chat-text {
+  white-space: pre-wrap;
+}
+.msg-ref {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 8px 1px 4px;
+  margin: 0 1px;
+  vertical-align: baseline;
+  background: #1c2440;
+  border: 1px solid #3d4a7a;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  color: #b8c0e0;
+  cursor: pointer;
+  font-family: inherit;
+  line-height: 1.45;
+  max-width: min(100%, 280px);
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+.msg-ref:hover {
+  background: #243055;
+  border-color: #4a6cf0;
+  color: #e8ecff;
+}
+.chat-msg--user .msg-ref {
+  background: #1a2240;
+  border-color: #4a6cf0;
+}
+.chat-msg--user .msg-ref:hover {
+  background: #243055;
 }
 .chat-refs {
   flex-shrink: 0;

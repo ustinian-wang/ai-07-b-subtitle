@@ -9,6 +9,9 @@
         },
       ]"
       :style="{ paddingLeft: `${8 + depth * 14}px` }"
+      draggable="true"
+      @dragstart="onDragStart"
+      @dragend="onDragEnd"
       @dragover.prevent="onDragOver"
       @dragenter.prevent="onDragEnter"
       @dragleave="onDragLeave"
@@ -54,6 +57,7 @@
           @folder-drag-over="$emit('folder-drag-over', $event)"
           @folder-drag-leave="$emit('folder-drag-leave', $event)"
           @folder-drop="$emit('folder-drop', $event)"
+          @folder-ref-drag-empty="$emit('folder-ref-drag-empty')"
         />
       </li>
       <li v-for="item in folder.records || []" :key="item.id">
@@ -72,7 +76,7 @@
         />
       </li>
       <li v-if="!(folder.records || []).length && !(folder.children || []).length" class="tree-empty">
-        空文件夹 · 可拖入字幕
+        空文件夹 · 可拖入内容
       </li>
     </ul>
   </div>
@@ -106,6 +110,7 @@ export default {
     'folder-drag-over',
     'folder-drag-leave',
     'folder-drop',
+    'folder-ref-drag-empty',
   ],
   computed: {
     folderCount() {
@@ -127,17 +132,49 @@ export default {
     onAction(action) {
       this.$emit('folder-action', { action, folder: this.folder });
     },
-    onDragOver() {
+    collectRecordIds(node) {
+      const ids = (node.records || []).map((r) => r.id);
+      for (const child of node.children || []) {
+        ids.push(...this.collectRecordIds(child));
+      }
+      return ids;
+    },
+    onDragStart(event) {
+      if (event.target.closest('.tree-toggle, .tree-folder-actions, .tree-mini')) {
+        event.preventDefault();
+        return;
+      }
+      const ids = this.collectRecordIds(this.folder);
+      if (!ids.length) {
+        event.preventDefault();
+        this.$emit('folder-ref-drag-empty');
+        return;
+      }
+      event.dataTransfer.effectAllowed = 'copy';
+      event.dataTransfer.setData('application/x-subtitle-ids', JSON.stringify(ids));
+      event.dataTransfer.setData('text/plain', `${this.folder.name} · ${ids.length} 条内容`);
+      this.$emit('record-drag-start', { ids, purpose: 'ref' });
+    },
+    onDragEnd() {
+      this.$emit('record-drag-end');
+    },
+    isRefDrag(event) {
+      return event.dataTransfer?.effectAllowed === 'copy';
+    },
+    onDragOver(event) {
+      if (this.isRefDrag(event)) return;
       this.$emit('folder-drag-over', this.folder.id);
     },
-    onDragEnter() {
+    onDragEnter(event) {
+      if (this.isRefDrag(event)) return;
       this.$emit('folder-drag-over', this.folder.id);
     },
     onDragLeave(event) {
       if (event.currentTarget.contains(event.relatedTarget)) return;
       this.$emit('folder-drag-leave', this.folder.id);
     },
-    onDrop() {
+    onDrop(event) {
+      if (this.isRefDrag(event)) return;
       this.$emit('folder-drop', this.folder.id);
     },
   },
@@ -163,10 +200,13 @@ export default {
   padding-bottom: 6px;
   padding-right: 8px;
   border-radius: 8px;
-  cursor: pointer;
+  cursor: grab;
   user-select: none;
   border: 1px solid transparent;
   transition: background 0.12s, border-color 0.12s;
+}
+.tree-folder:active {
+  cursor: grabbing;
 }
 .tree-folder:hover {
   background: #1a2038;

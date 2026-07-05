@@ -9,7 +9,10 @@
             'drop-target': dropTargetId === '__uncategorized__',
           },
         ]"
+        draggable="true"
         @click="$emit('select-folder', null)"
+        @dragstart="onUncatDragStart"
+        @dragend="onUncatDragEnd"
         @dragover.prevent="onUncatDragOver"
         @dragenter.prevent="onUncatDragOver"
         @dragleave="onUncatDragLeave"
@@ -43,7 +46,7 @@
             @drag-end="$emit('record-drag-end', $event)"
           />
         </li>
-        <li v-if="!uncategorized.length" class="tree-empty">暂无记录 · 可拖入字幕</li>
+        <li v-if="!uncategorized.length" class="tree-empty">暂无记录 · 可拖入内容</li>
       </ul>
     </li>
 
@@ -68,6 +71,7 @@
         @folder-drag-over="$emit('folder-drag-over', $event)"
         @folder-drag-leave="$emit('folder-drag-leave', $event)"
         @folder-drop="$emit('folder-drop', $event)"
+        @folder-ref-drag-empty="$emit('folder-ref-drag-empty')"
       />
     </li>
   </ul>
@@ -102,16 +106,41 @@ export default {
     'folder-drag-over',
     'folder-drag-leave',
     'folder-drop',
+    'folder-ref-drag-empty',
   ],
   methods: {
-    onUncatDragOver() {
+    isRefDrag(event) {
+      return event.dataTransfer?.effectAllowed === 'copy';
+    },
+    onUncatDragStart(event) {
+      if (event.target.closest('.tree-toggle')) {
+        event.preventDefault();
+        return;
+      }
+      const ids = this.uncategorized.map((r) => r.id);
+      if (!ids.length) {
+        event.preventDefault();
+        this.$emit('folder-ref-drag-empty');
+        return;
+      }
+      event.dataTransfer.effectAllowed = 'copy';
+      event.dataTransfer.setData('application/x-subtitle-ids', JSON.stringify(ids));
+      event.dataTransfer.setData('text/plain', `未分类 · ${ids.length} 条内容`);
+      this.$emit('record-drag-start', { ids, purpose: 'ref' });
+    },
+    onUncatDragEnd() {
+      this.$emit('record-drag-end');
+    },
+    onUncatDragOver(event) {
+      if (this.isRefDrag(event)) return;
       this.$emit('folder-drag-over', '__uncategorized__');
     },
     onUncatDragLeave(event) {
       if (event.currentTarget.contains(event.relatedTarget)) return;
       this.$emit('folder-drag-leave', '__uncategorized__');
     },
-    onUncatDrop() {
+    onUncatDrop(event) {
+      if (this.isRefDrag(event)) return;
       this.$emit('folder-drop', '__uncategorized__');
     },
   },
@@ -146,10 +175,13 @@ export default {
   gap: 4px;
   padding: 6px 8px;
   border-radius: 8px;
-  cursor: pointer;
+  cursor: grab;
   user-select: none;
   border: 1px solid transparent;
   transition: background 0.12s, border-color 0.12s;
+}
+.tree-folder:active {
+  cursor: grabbing;
 }
 .tree-folder:hover {
   background: #1a2038;
