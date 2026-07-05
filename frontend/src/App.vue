@@ -20,6 +20,7 @@
       </div>
 
       <p class="save-hint">新提取默认保存到「未分类」，可拖拽或批量移动到文件夹</p>
+      <p v-if="libraryTip" class="library-tip">{{ libraryTip }}</p>
       <div v-if="allRecordIds.length" class="batch-bar">
         <label class="check">
           <input
@@ -30,7 +31,7 @@
           />
           全选
         </label>
-        <span class="batch-count">{{ selectedIds.length }} 条</span>
+        <span class="batch-count">{{ selectedIds.length }} 条笔记</span>
         <span class="batch-hint">框选 · 拖到文件夹</span>
         <div class="batch-actions">
           <button class="btn tiny" :disabled="!selectedIds.length" @click="batchMove">
@@ -279,6 +280,7 @@ export default {
       dragPurpose: null,
       dropTargetFolderId: null,
       marquee: { active: false, startX: 0, startY: 0, x: 0, y: 0, w: 0, h: 0 },
+      libraryTip: '',
     };
   },
   computed: {
@@ -379,6 +381,7 @@ export default {
     window.addEventListener('resize', this._onWindowResize);
   },
   beforeUnmount() {
+    clearTimeout(this._libraryTipTimer);
     this.stopSidebarResize();
     this.stopChatResize();
     this.stopMarquee();
@@ -561,11 +564,15 @@ export default {
       this.dropTargetFolderId = null;
       this.dragPurpose = null;
     },
-    onFolderRefDragEmpty() {
-      this.savedTip = '文件夹为空';
-      setTimeout(() => {
-        if (this.savedTip === '文件夹为空') this.savedTip = '';
+    showLibraryTip(msg) {
+      this.libraryTip = msg;
+      clearTimeout(this._libraryTipTimer);
+      this._libraryTipTimer = setTimeout(() => {
+        if (this.libraryTip === msg) this.libraryTip = '';
       }, 2000);
+    },
+    onFolderRefDragEmpty() {
+      this.showLibraryTip('文件夹为空');
     },
     onFolderDragOver(folderId) {
       this.dropTargetFolderId = folderId;
@@ -608,7 +615,7 @@ export default {
         await this.loadTree();
         this.selectedIds = ids.filter((id) => this.allRecordIds.includes(id));
         if (data.moved.length) {
-          this.savedTip = `已移动 ${data.moved.length} 条到${folderId ? '文件夹' : '未分类'}`;
+          this.savedTip = `已移动 ${data.moved.length} 条笔记到${folderId ? '文件夹' : '未分类'}`;
           setTimeout(() => {
             if (this.savedTip.startsWith('已移动')) this.savedTip = '';
           }, 2000);
@@ -803,7 +810,7 @@ export default {
         this.duplicatePrompt = null;
         this.result = data;
         if (data.record_id) {
-          this.savedTip = force ? '已重新提取并保存' : '已保存到库';
+          this.savedTip = force ? '已重新提取并保存' : '已保存到笔记库';
         }
         await this.loadTree();
       } catch (e) {
@@ -1059,6 +1066,16 @@ body {
   background: #151a2e;
   border-radius: 6px;
   color: #8b94b8;
+  font-size: 0.78rem;
+  flex-shrink: 0;
+}
+.library-tip {
+  margin: -4px 0 10px;
+  padding: 6px 10px;
+  background: #3a1824;
+  border: 1px solid #6b3040;
+  border-radius: 6px;
+  color: #ffb4b4;
   font-size: 0.78rem;
   flex-shrink: 0;
 }

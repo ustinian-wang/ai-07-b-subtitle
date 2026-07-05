@@ -161,8 +161,6 @@
           :disabled="busy"
           @input="onInput"
           @keydown="onKeydown"
-          @dragover="onComposerDragOver"
-          @drop="onComposerDrop"
         />
         <ul v-if="mention.active && mentionItems.length" class="mention-popup">
           <li
@@ -269,7 +267,7 @@ export default {
     },
     attachRecordAsMention(id, { at, after, focus = false } = {}) {
       const rec = this.recordMap[id];
-      if (!rec) return false;
+      if (!rec || this.hasRef(id)) return false;
       const title = this.mentionLabel(rec);
       const insert = `@[${title}](${id})`;
       this.addRef(id, title, rec.source);
@@ -341,30 +339,27 @@ export default {
       }
       return false;
     },
+    subtitleDropEffect(e) {
+      const allowed = e.dataTransfer?.effectAllowed || 'all';
+      if (allowed === 'copy' || allowed === 'all' || allowed === 'copyMove' || allowed === 'copyLink') {
+        return 'copy';
+      }
+      return 'move';
+    },
     onDropZoneDragOver(e) {
       if (!this.hasSubtitleDrag(e)) return;
       e.preventDefault();
-      e.dataTransfer.dropEffect = 'copy';
-    },
-    onComposerDragOver(e) {
-      if (!this.hasSubtitleDrag(e)) return;
-      e.preventDefault();
-      e.stopPropagation();
-      e.dataTransfer.dropEffect = 'copy';
-    },
-    onComposerDrop(e) {
-      if (!this.hasSubtitleDrag(e)) return;
-      e.preventDefault();
-      e.stopPropagation();
-      this.onDropZoneDrop(e);
+      e.dataTransfer.dropEffect = this.subtitleDropEffect(e);
     },
     onDropZoneEnter(e) {
       if (!this.hasSubtitleDrag(e)) return;
+      e.preventDefault();
       this.dropDepth += 1;
       this.dropActive = true;
     },
     onDropZoneLeave(e) {
       if (!this.hasSubtitleDrag(e)) return;
+      if (e.currentTarget.contains(e.relatedTarget)) return;
       this.dropDepth -= 1;
       if (this.dropDepth <= 0) {
         this.dropDepth = 0;

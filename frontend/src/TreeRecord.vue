@@ -11,13 +11,20 @@
     ]"
     :style="{ paddingLeft: `${8 + depth * 14}px` }"
     draggable="true"
-    @dragstart="onDragStart"
+    @dragstart.stop="onDragStart"
     @dragend="onDragEnd"
   >
     <label class="tree-record-check" @click.stop>
       <input type="checkbox" :checked="selected" @change="$emit('toggle-select')" />
     </label>
-    <button type="button" class="tree-record-main" @click="$emit('open')">
+    <div
+      role="button"
+      tabindex="0"
+      class="tree-record-main"
+      @click="$emit('open')"
+      @keydown.enter.prevent="$emit('open')"
+      @keydown.space.prevent="$emit('open')"
+    >
       <span class="tree-record-icon">{{ item.source === 'xiaohongshu' ? '📕' : '📄' }}</span>
       <span class="tree-record-body">
         <span class="tree-record-title-row">
@@ -40,7 +47,7 @@
           </template>
         </span>
       </span>
-    </button>
+    </div>
     <button type="button" class="tree-record-del" title="删除" @click.stop="$emit('remove')">×</button>
   </div>
 </template>
@@ -70,10 +77,11 @@ export default {
         return;
       }
       const ids = this.dragIds();
-      event.dataTransfer.effectAllowed = 'move';
+      // ponytail: copyMove 同时支持侧栏移动与对话区 @ 引用；侧栏靠 purpose=move 区分
+      event.dataTransfer.effectAllowed = 'copyMove';
       event.dataTransfer.setData('application/x-subtitle-ids', JSON.stringify(ids));
       event.dataTransfer.setData('text/plain', `${ids.length} 条笔记`);
-      this.$emit('drag-start', { ids });
+      this.$emit('drag-start', { ids, purpose: 'move' });
     },
     onDragEnd() {
       this.$emit('drag-end');
