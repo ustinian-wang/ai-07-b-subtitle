@@ -1,0 +1,67 @@
+backend/app/services/xiaohongshu.py
+  s_494438b44b9e5c::t_587e641904fc1c 1-334
+backend/app/services/settings_store.py
+  s_494438b44b9e5c::t_bba9e316446c4a 59-67,69-70,72-75
+frontend/src/SettingsPage.vue
+  s_494438b44b9e5c::t_b1972a39137564 15-16,29-52,71-75,90-93,102-104,110,114,122-125,127,175-177,212-214,216
+  s_494438b44b9e5c::t_27079161001b84 105-109
+  s_494438b44b9e5c::t_b4fa10a30aa9cc 215
+frontend/src/TreeRecord.vue
+  s_494438b44b9e5c::t_37be72274da49e 21,23-24,27-35
+frontend/src/App.vue
+  s_494438b44b9e5c::t_7374b1740a0b32 112-113,118
+  s_494438b44b9e5c::t_00819602bca224 132,138,143-147,149
+  s_494438b44b9e5c::t_89d8f7dee24b7d 1063-1092
+  s_494438b44b9e5c::t_8fa5553242f766 274-302
+  s_494438b44b9e5c::t_caaf9271741bc6 159-173,178-191
+  s_494438b44b9e5c::t_49acb671271276 192
+backend/.env.example
+  s_494438b44b9e5c::t_95dcc34bec9de5 1,4-5
+  s_494438b44b9e5c::t_a65eedad864c57 6
+backend/app/api/v1/settings.py
+  s_494438b44b9e5c::t_ec1bd85e75b497 22
+  s_494438b44b9e5c::t_d732dac6c7ab68 19,21,23-25
+README.md
+  s_494438b44b9e5c::t_a517edc5461bb2 83-84
+  s_494438b44b9e5c::t_a8a4d5757b754c 3
+  s_494438b44b9e5c::t_4bdad12324c851 17
+  s_494438b44b9e5c::t_b9407950d58368 86,93
+  s_494438b44b9e5c::t_18c497a9019993 108-110,122-132
+  s_494438b44b9e5c::t_1ab74845d2c431 159
+  s_494438b44b9e5c::t_272f5db763695f 10-11
+  s_494438b44b9e5c::t_78452efcd4d2ad 133
+backend/app/api/v1/subtitle.py
+  s_494438b44b9e5c::t_c53c3b8bb85fc9 31,38,45,50,75,95-122,129,140,144-148,167,172-176,186-192,215-232,237-241,245,248-254,270,369,381,402-420,423,446
+backend/app/models/schemas.py
+  s_494438b44b9e5c::t_7dcaa85188b8b5 30-38,40,42,44
+  s_494438b44b9e5c::t_9a04db939ef781 162-163,168
+  s_494438b44b9e5c::t_883f141379f5de 71,73-80,85
+  s_494438b44b9e5c::t_7fee45c4c9d451 7-9
+  s_494438b44b9e5c::t_3b744c05aafeb2 56,58-59,61
+backend/app/services/subtitle_store.py
+  s_494438b44b9e5c::t_f6effc8dae9e32 100-109
+  s_494438b44b9e5c::t_6c63b8e5f30ab0 313-320,323,325-326,331
+  s_494438b44b9e5c::t_10fdd98afbb2fb 266-270
+  s_494438b44b9e5c::t_cc8d3e6ad20717 375-390
+  s_494438b44b9e5c::t_f029c07c9bc5af 118,122-123,127-136,139-140,146-150,157
+  s_494438b44b9e5c::t_95e2b3577801ca 37-59
+backend/app/services/platform.py
+  s_494438b44b9e5c::t_553784e9508e47 57
+  s_494438b44b9e5c::t_f428cd238ce9db 1-56,58-63
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "5da62f5b315b51fba1485fbefa82b39e4cfdd903",
+  "prompts": {},
+  "sessions": {
+    "s_494438b44b9e5c": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "72812374-9fa8-4ff5-909a-110ac9a87421",
+        "model": "default"
+      },
+      "human_author": "jser <87244899@qq.com>"
+    }
+  }
+}
