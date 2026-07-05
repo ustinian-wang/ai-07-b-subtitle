@@ -12,8 +12,8 @@
         Application → Cookies → 复制 <code>SESSDATA</code> 的值。
       </p>
 
-      <p v-if="configured" class="status ok">
-        当前已配置：<code>{{ masked }}</code>
+      <p v-if="biliConfigured" class="status ok">
+        当前已配置：<code>{{ biliMasked }}</code>
       </p>
       <p v-else class="status warn">尚未配置 SESSDATA</p>
 
@@ -25,6 +25,30 @@
         type="password"
         autocomplete="off"
         placeholder="粘贴 SESSDATA，留空并保存可清除"
+      />
+    </section>
+
+    <section class="panel">
+      <h2 class="section-title">小红书登录 Cookie</h2>
+      <p class="hint">
+        粘贴登录 <a href="https://www.xiaohongshu.com" target="_blank" rel="noopener">xiaohongshu.com</a>
+        后的 Cookie（推荐整段复制，或至少包含 <code>web_session</code>）。尽量使用 App
+        分享的完整链接（含 <code>xsec_token</code>）。
+      </p>
+
+      <p v-if="xhsConfigured" class="status ok">
+        当前已配置：<code>{{ xhsMasked }}</code>
+      </p>
+      <p v-else class="status warn">尚未配置小红书 Cookie</p>
+
+      <label class="label" for="xhs-cookie">XIAOHONGSHU COOKIE</label>
+      <textarea
+        id="xhs-cookie"
+        v-model="xhsCookie"
+        class="input textarea"
+        rows="4"
+        autocomplete="off"
+        placeholder="粘贴 Cookie，留空并保存可清除"
       />
 
       <div class="toolbar">
@@ -44,8 +68,11 @@ export default {
   data() {
     return {
       sessdata: '',
-      configured: false,
-      masked: '',
+      xhsCookie: '',
+      biliConfigured: false,
+      biliMasked: '',
+      xhsConfigured: false,
+      xhsMasked: '',
       saving: false,
       tip: '',
       tipOk: true,
@@ -60,8 +87,10 @@ export default {
         const resp = await fetch('/api/v1/settings');
         const data = await resp.json();
         if (!resp.ok) return;
-        this.configured = !!data.bilibili_sessdata_configured;
-        this.masked = data.bilibili_sessdata_masked || '';
+        this.biliConfigured = !!data.bilibili_sessdata_configured;
+        this.biliMasked = data.bilibili_sessdata_masked || '';
+        this.xhsConfigured = !!data.xiaohongshu_cookie_configured;
+        this.xhsMasked = data.xiaohongshu_cookie_masked || '';
       } catch {
         /* ignore */
       }
@@ -70,10 +99,19 @@ export default {
       this.saving = true;
       this.tip = '';
       try {
+        const body = {};
+        if (this.sessdata !== '') body.bilibili_sessdata = this.sessdata;
+        if (this.xhsCookie !== '') body.xiaohongshu_cookie = this.xhsCookie;
+        if (!Object.keys(body).length) {
+          this.tip = '请填写要更新的配置项';
+          this.tipOk = false;
+          return;
+        }
+
         const resp = await fetch('/api/v1/settings', {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ bilibili_sessdata: this.sessdata }),
+          body: JSON.stringify(body),
         });
         const data = await resp.json();
         if (!resp.ok) {
@@ -81,9 +119,12 @@ export default {
           this.tipOk = false;
           return;
         }
-        this.configured = !!data.bilibili_sessdata_configured;
-        this.masked = data.bilibili_sessdata_masked || '';
+        this.biliConfigured = !!data.bilibili_sessdata_configured;
+        this.biliMasked = data.bilibili_sessdata_masked || '';
+        this.xhsConfigured = !!data.xiaohongshu_cookie_configured;
+        this.xhsMasked = data.xiaohongshu_cookie_masked || '';
         this.sessdata = '';
+        this.xhsCookie = '';
         this.tip = '已保存';
         this.tipOk = true;
       } catch (e) {
@@ -131,6 +172,9 @@ export default {
   font-size: 0.9rem;
   line-height: 1.55;
 }
+.hint a {
+  color: #a8b8ff;
+}
 .hint code {
   color: #a8b8ff;
   font-size: 0.85em;
@@ -163,6 +207,11 @@ export default {
   background: #0f1220;
   color: #e8ecff;
   font-size: 0.95rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.textarea {
+  resize: vertical;
+  min-height: 88px;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 .toolbar {

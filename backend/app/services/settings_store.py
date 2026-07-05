@@ -56,9 +56,21 @@ def get_bilibili_sessdata() -> str | None:
     return from_env or None
 
 
+def get_xiaohongshu_cookie() -> str | None:
+    """优先 settings.json，fallback .env。"""
+    from_file = (load_settings().get("xiaohongshu_cookie") or "").strip()
+    if from_file:
+        return from_file
+    from_env = os.getenv("XIAOHONGSHU_COOKIE", "").strip()
+    return from_env or None
+
+
 def public_settings() -> dict[str, Any]:
-    raw = get_bilibili_sessdata() or ""
+    bili = get_bilibili_sessdata() or ""
+    xhs = get_xiaohongshu_cookie() or ""
     return {
-        "bilibili_sessdata_configured": bool(raw),
-        "bilibili_sessdata_masked": mask_secret(raw),
+        "bilibili_sessdata_configured": bool(bili),
+        "bilibili_sessdata_masked": mask_secret(bili),
+        "xiaohongshu_cookie_configured": bool(xhs),
+        "xiaohongshu_cookie_masked": mask_secret(xhs),
     }

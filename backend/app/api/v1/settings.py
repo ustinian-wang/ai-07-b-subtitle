@@ -16,7 +16,11 @@ def get_settings() -> SettingsPublic:
 @router.patch("", response_model=SettingsPublic)
 def patch_settings(body: SettingsPatchRequest) -> SettingsPublic:
     updates = body.model_dump(exclude_unset=True)
+    patch: dict = {}
     if "bilibili_sessdata" in updates:
-        val = updates["bilibili_sessdata"]
-        settings_store.patch_settings({"bilibili_sessdata": (val or "").strip()})
+        patch["bilibili_sessdata"] = (updates["bilibili_sessdata"] or "").strip()
+    if "xiaohongshu_cookie" in updates:
+        patch["xiaohongshu_cookie"] = (updates["xiaohongshu_cookie"] or "").strip()
+    if patch:
+        settings_store.patch_settings(patch)
     return SettingsPublic.model_validate(settings_store.public_settings())

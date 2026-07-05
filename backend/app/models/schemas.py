@@ -4,9 +4,9 @@ from pydantic import BaseModel, Field
 
 
 class SubtitleExtractRequest(BaseModel):
-    url: str = Field(..., min_length=4, description="B 站视频链接或 BV/av 号")
-    page: int = Field(1, ge=1, description="分 P 序号，从 1 开始")
-    lang: str | None = Field(None, description="优先字幕语言，如 zh-CN / ai-zh")
+    url: str = Field(..., min_length=4, description="B 站 / 小红书链接")
+    page: int = Field(1, ge=1, description="B 站分 P 序号，从 1 开始")
+    lang: str | None = Field(None, description="B 站优先字幕语言，如 zh-CN / ai-zh")
     save: bool = Field(True, description="提取成功后自动保存到本地库")
     force: bool = Field(False, description="强制重新提取，忽略本地已有记录")
     folder_id: str | None = Field(None, description="保存到指定文件夹，null 为未分类")
@@ -27,15 +27,21 @@ class SubtitleTrack(BaseModel):
 
 
 class SubtitleExtractResponse(BaseModel):
-    bvid: str
-    aid: int
-    cid: int
+    source: str = "bilibili"
+    bvid: str = ""
+    aid: int = 0
+    cid: int = 0
+    note_id: str = ""
+    note_type: str = ""
+    author: str = ""
+    tags: list[str] = Field(default_factory=list)
+    images: list[str] = Field(default_factory=list)
     title: str
-    page: int
+    page: int = 1
     page_title: str = ""
-    tracks: list[SubtitleTrack]
+    tracks: list[SubtitleTrack] = Field(default_factory=list)
     selected_track: SubtitleTrack | None = None
-    lines: list[SubtitleLine]
+    lines: list[SubtitleLine] = Field(default_factory=list)
     text: str
     need_login: bool = False
     hint: str = ""
@@ -47,10 +53,12 @@ class SubtitleExtractResponse(BaseModel):
 
 class SubtitleRecordSummary(BaseModel):
     id: str
+    source: str = "bilibili"
     folder_id: str | None = None
-    bvid: str
+    bvid: str = ""
+    note_id: str = ""
     title: str
-    page: int
+    page: int = 1
     page_title: str = ""
     line_count: int = 0
     lan_doc: str = ""
@@ -60,15 +68,21 @@ class SubtitleRecordSummary(BaseModel):
 
 
 class SubtitleSaveRequest(BaseModel):
+    source: str = "bilibili"
     source_url: str = ""
-    bvid: str
-    aid: int
-    cid: int
+    bvid: str = ""
+    aid: int = 0
+    cid: int = 0
+    note_id: str = ""
+    note_type: str = ""
+    author: str = ""
+    tags: list[str] = Field(default_factory=list)
+    images: list[str] = Field(default_factory=list)
     title: str
     page: int = 1
     page_title: str = ""
     selected_track: SubtitleTrack | None = None
-    lines: list[SubtitleLine]
+    lines: list[SubtitleLine] = Field(default_factory=list)
     text: str
 
 
@@ -145,7 +159,10 @@ LibraryTreeFolder.model_rebuild()
 class SettingsPublic(BaseModel):
     bilibili_sessdata_configured: bool = False
     bilibili_sessdata_masked: str = ""
+    xiaohongshu_cookie_configured: bool = False
+    xiaohongshu_cookie_masked: str = ""
 
 
 class SettingsPatchRequest(BaseModel):
     bilibili_sessdata: str | None = None
+    xiaohongshu_cookie: str | None = None

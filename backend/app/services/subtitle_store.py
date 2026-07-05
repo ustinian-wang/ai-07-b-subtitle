@@ -34,6 +34,29 @@ def make_dedupe_key(bvid: str, page: int, lan: str) -> str:
     return f"{safe_bvid}_p{int(page or 1)}_{safe_lan}"
 
 
+def make_xhs_dedupe_key(note_id: str) -> str:
+    safe = re.sub(r"[^a-zA-Z0-9._-]+", "_", (note_id or "").strip().lower())[:80]
+    return f"xhs_{safe}"
+
+
+def record_dedupe_key(rec: dict[str, Any]) -> str:
+    source = rec.get("source") or "bilibili"
+    if source == "xiaohongshu":
+        return make_xhs_dedupe_key(rec.get("note_id") or rec.get("bvid") or "")
+    return rec.get("dedupe_key") or make_dedupe_key(
+        rec.get("bvid") or "", int(rec.get("page") or 1), _lan_from_record(rec)
+    )
+
+
+def find_by_xhs_note_id(note_id: str) -> dict[str, Any] | None:
+    key = make_xhs_dedupe_key(note_id)
+    for path in _records_dir().glob("*.json"):
+        rec = _read_file(path)
+        if rec and record_dedupe_key(rec) == key:
+            return rec
+    return None
+
+
 def _lan_from_record(rec: dict[str, Any]) -> str:
     track = rec.get("selected_track") or {}
     return (track.get("lan") or track.get("lan_doc") or "").strip()
@@ -74,11 +97,16 @@ def _pick_existing_record(records: list[dict[str, Any]], lang: str | None) -> di
 
 
 def upsert_record(payload: dict[str, Any]) -> dict[str, Any]:
-    bvid = payload.get("bvid") or ""
-    page = int(payload.get("page") or 1)
-    track = payload.get("selected_track") or {}
-    lan = (track.get("lan") or track.get("lan_doc") or "").strip()
-    existing = find_by_dedupe_key(bvid, page, lan)
+    source = payload.get("source") or "bilibili"
+    if source == "xiaohongshu":
+        note_id = payload.get("note_id") or ""
+        existing = find_by_xhs_note_id(note_id)
+    else:
+        bvid = payload.get("bvid") or ""
+        page = int(payload.get("page") or 1)
+        track = payload.get("selected_track") or {}
+        lan = (track.get("lan") or track.get("lan_doc") or "").strip()
+        existing = find_by_dedupe_key(bvid, page, lan)
     if existing:
         payload = {**payload, "id": existing["id"], "created_at": existing.get("created_at")}
     return save_record(payload)
@@ -87,27 +115,46 @@ def upsert_record(payload: dict[str, Any]) -> dict[str, Any]:
 def save_record(payload: dict[str, Any]) -> dict[str, Any]:
     record_id = str(payload.get("id") or "").strip() or uuid.uuid4().hex[:12]
     now = _now_iso()
+    source = payload.get("source") or "bilibili"
     track = payload.get("selected_track") or {}
     lan = (track.get("lan") or track.get("lan_doc") or "").strip()
     existing = _read_file(_record_path(record_id)) if str(payload.get("id") or "").strip() else None
+    if not source and existing:
+        source = existing.get("source") or "bilibili"
     folder_id = payload.get("folder_id")
     if folder_id is None and existing:
         folder_id = existing.get("folder_id")
+
+    if source == "xiaohongshu":
+        note_id = payload.get("note_id") or ""
+        dedupe_key = make_xhs_dedupe_key(note_id)
+        line_count = len(payload.get("tags") or [])
+    else:
+        note_id = payload.get("note_id") or ""
+        dedupe_key = make_dedupe_key(payload.get("bvid") or "", int(payload.get("page") or 1), lan)
+        line_count = len(payload.get("lines") or [])
+
     record = {
         "id": record_id,
-        "dedupe_key": make_dedupe_key(payload.get("bvid") or "", int(payload.get("page") or 1), lan),
+        "source": source,
+        "dedupe_key": dedupe_key,
         "folder_id": folder_id,
         "source_url": payload.get("source_url") or "",
         "bvid": payload.get("bvid") or "",
         "aid": int(payload.get("aid") or 0),
         "cid": int(payload.get("cid") or 0),
+        "note_id": note_id,
+        "note_type": payload.get("note_type") or "",
+        "author": payload.get("author") or "",
+        "tags": payload.get("tags") or [],
+        "images": payload.get("images") or [],
         "title": payload.get("title") or "",
         "page": int(payload.get("page") or 1),
         "page_title": payload.get("page_title") or "",
         "selected_track": payload.get("selected_track"),
         "lines": payload.get("lines") or [],
         "text": payload.get("text") or "",
-        "line_count": len(payload.get("lines") or []),
+        "line_count": line_count,
         "created_at": payload.get("created_at") or (existing or {}).get("created_at") or now,
         "updated_at": now,
     }
@@ -216,7 +263,11 @@ def _read_file(path: Path) -> dict[str, Any] | None:
     if not isinstance(raw, dict):
         return None
     raw.setdefault("id", path.stem)
-    raw["line_count"] = len(raw.get("lines") or [])
+    raw.setdefault("source", "bilibili")
+    if (raw.get("source") or "bilibili") == "xiaohongshu":
+        raw["line_count"] = len(raw.get("tags") or [])
+    else:
+        raw["line_count"] = len(raw.get("lines") or [])
     return raw
 
 
@@ -259,15 +310,25 @@ def build_library_tree() -> dict[str, Any]:
 
 def _summary(rec: dict[str, Any]) -> dict[str, Any]:
     track = rec.get("selected_track") or {}
+    source = rec.get("source") or "bilibili"
+    if source == "xiaohongshu":
+        note_type = rec.get("note_type") or "normal"
+        lan_doc = "视频" if note_type == "video" else "图文"
+        ext_id = rec.get("note_id") or ""
+    else:
+        lan_doc = track.get("lan_doc") or track.get("lan") or ""
+        ext_id = rec.get("bvid") or ""
     return {
         "id": rec.get("id") or "",
+        "source": source,
         "folder_id": rec.get("folder_id"),
-        "bvid": rec.get("bvid") or "",
+        "bvid": ext_id if source == "bilibili" else "",
+        "note_id": ext_id if source == "xiaohongshu" else (rec.get("note_id") or ""),
         "title": rec.get("title") or "",
         "page": rec.get("page") or 1,
         "page_title": rec.get("page_title") or "",
         "line_count": rec.get("line_count") or 0,
-        "lan_doc": track.get("lan_doc") or track.get("lan") or "",
+        "lan_doc": lan_doc,
         "source_url": rec.get("source_url") or "",
         "created_at": rec.get("created_at") or "",
         "updated_at": rec.get("updated_at") or "",
@@ -310,6 +371,22 @@ def _self_check() -> None:
     assert "updated" in exp["content"]
     batch = delete_records([rid])
     assert rid in batch["deleted"]
+
+    xid = f"xhs_{uuid.uuid4().hex[:6]}"
+    xhs_id = "656abc123def456789012345"
+    xhs_rid = save_record(
+        {
+            "id": xid,
+            "source": "xiaohongshu",
+            "note_id": xhs_id,
+            "title": "小红书测试",
+            "note_type": "normal",
+            "tags": ["测试"],
+            "text": "标题\n\n正文",
+        }
+    )["id"]
+    assert find_by_xhs_note_id(xhs_id)["id"] == xhs_rid
+    delete_records([xhs_rid])
 
 
 if __name__ == "__main__":

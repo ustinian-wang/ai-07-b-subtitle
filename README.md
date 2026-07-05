@@ -1,18 +1,20 @@
 # ai-07-b-subtitle
 
-**B 站视频字幕提取与管理** 教学沙箱（FastAPI + httpx + Vue 3 + Vite）。输入视频链接 → 解析 BV/av → 拉取 CC / AI 字幕 → 本地 JSON 库持久化、去重与批量导出。
+**B 站字幕 + 小红书笔记** 提取与管理教学沙箱（FastAPI + httpx + Vue 3 + Vite）。粘贴链接 → 自动识别平台 → 提取内容 → 本地 JSON 库持久化、目录树与批量管理。
 
 > 本目录为 **独立 Git 仓库**，可在 monorepo 的 `projects/` 下单独 clone / push，与 `ai-01-chat` 等家族项目结构对齐。共性约定见 monorepo 根目录 [`docs/ai-projects-family.md`](../../docs/ai-projects-family.md)（若仅 clone 本子仓，可忽略该链接）。
 
 ## 功能
 
 - 支持 `bilibili.com/video/BV…`、`av…`、`b23.tv` / `bili2233.cn` 短链
+- 支持 `xiaohongshu.com/explore/…`、`xhslink.com` 短链（笔记标题/正文/标签/图片）
+- 粘贴链接**自动识别平台**（B 站 / 小红书）
 - 多分 P（`page` 参数，从 1 开始）
 - 自动优先选择中文字幕轨（`zh-cn` / `zh` / `ai-zh` 等）
 - **提取后自动保存**到本地字幕库（`backend/data/subtitles/*.json`）
 - **去重**：同一 `bvid + page + 字幕轨 lan` 仅一条；重复提取时提示，可查看已有或 `force: true` 强制重拉
 - **字幕库侧栏**：目录树（文件夹 + 字幕文件）、折叠展开、新建/重命名/删除文件夹、批量移动/删除/复制/导出
-- **设置页**（右上角）：配置 B 站登录 Cookie **`SESSDATA`**，存 `backend/data/settings.json`（API 响应脱敏）
+- **设置页**（右上角）：B 站 **SESSDATA**、小红书 **Cookie**
 - **开发热更**：`scripts/dev.sh dev` 或 `uvicorn --reload` + Vite HMR
 
 ## 目录结构
@@ -78,19 +80,17 @@ npm install && npm run dev -- --host 0.0.0.0 --port 9177
 
 | 方式 | 说明 |
 |------|------|
-| **UI 设置页** | 写入 `backend/data/settings.json`，GET API 仅返回脱敏值（如 `9f8e****IIEC`） |
-| **环境变量 fallback** | `backend/.env` 中 `BILIBILI_SESSDATA=`（settings 未配置时使用） |
+| **UI 设置页** | B 站 `SESSDATA`、小红书整段 Cookie → `backend/data/settings.json`（GET 脱敏） |
+| **环境变量 fallback** | `BILIBILI_SESSDATA`、`XIAOHONGSHU_COOKIE` |
 
-获取 Cookie：浏览器登录 [bilibili.com](https://www.bilibili.com) → F12 → Application → Cookies → 复制 `SESSDATA` 的值。
-
-> **安全**：`backend/data/`、`.env` 已在 `.gitignore`，勿将 SESSDATA 提交进 Git。
+获取 Cookie：浏览器登录对应站点 → F12 → Application → Cookies。
 
 ## 主要 API
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | GET | `/api/health` | 健康检查 |
-| POST | `/api/v1/subtitle/extract` | 提取字幕；body 见下 |
+| POST | `/api/v1/subtitle/extract` | 提取内容（自动识别 B 站 / 小红书）；body 见下 |
 | POST | `/api/v1/subtitle/save` | 手动保存（一般无需，提取已自动落盘） |
 | GET | `/api/v1/subtitle/tree` | 目录树（文件夹嵌套 + 未分类字幕） |
 | POST | `/api/v1/subtitle/folders` | 新建文件夹，`{"name":"…","parent_id":null}` |
@@ -105,7 +105,9 @@ npm install && npm run dev -- --host 0.0.0.0 --port 9177
 | GET | `/api/v1/settings` | 读取设置（SESSDATA 脱敏） |
 | PATCH | `/api/v1/settings` | 更新设置，`{"bilibili_sessdata":"..."}`，空字符串可清除 |
 
-### 提取字幕 `POST /api/v1/subtitle/extract`
+### 提取 `POST /api/v1/subtitle/extract`
+
+B 站示例：
 
 ```json
 {
@@ -116,6 +118,18 @@ npm install && npm run dev -- --host 0.0.0.0 --port 9177
   "folder_id": null
 }
 ```
+
+小红书示例：
+
+```json
+{
+  "url": "https://www.xiaohongshu.com/explore/656abc...?xsec_token=...",
+  "force": false,
+  "folder_id": null
+}
+```
+
+响应含 `source`（`bilibili` / `xiaohongshu`）。小红书额外字段：`note_id`、`note_type`、`tags`、`images`、`author`。
 
 | 字段 | 说明 |
 |------|------|
@@ -142,7 +156,7 @@ npm install && npm run dev -- --host 0.0.0.0 --port 9177
 
 ## 技术说明
 
-- **无 LLM**：后端通过 `httpx` 调用 B 站公开 API（`view` → `player/wbi/v2` → 字幕 JSON），不依赖 OpenAI
+- **无 LLM**：`httpx` 调 B 站 / 小红书 Web API（小红书：edith feed + `__INITIAL_STATE__` 回退）
 - **WBI 签名**：player 接口需 nav 接口提供的 img/sub key 签名
 - **代理**：前端 Vite 将 `/api` 代理到 `http://127.0.0.1:8907`（见 `frontend/vite.config.js`）
 

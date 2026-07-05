@@ -18,15 +18,21 @@
       <input type="checkbox" :checked="selected" @change="$emit('toggle-select')" />
     </label>
     <button type="button" class="tree-record-main" @click="$emit('open')">
-      <span class="tree-record-icon">📄</span>
+      <span class="tree-record-icon">{{ item.source === 'xiaohongshu' ? '📕' : '📄' }}</span>
       <span class="tree-record-body">
-        <span class="tree-record-title" :title="item.title || item.bvid">
-          {{ item.title || item.bvid }}
+        <span class="tree-record-title" :title="item.title || item.bvid || item.note_id">
+          {{ item.title || item.bvid || item.note_id }}
         </span>
         <span class="tree-record-meta">
-          {{ item.bvid }} · P{{ item.page }}
-          <span v-if="item.lan_doc"> · {{ item.lan_doc }}</span>
-          · {{ item.line_count }} 条
+          <template v-if="item.source === 'xiaohongshu'">
+            小红书 · {{ item.note_id || '—' }}
+            <span v-if="item.lan_doc"> · {{ item.lan_doc }}</span>
+          </template>
+          <template v-else>
+            {{ item.bvid }} · P{{ item.page }}
+            <span v-if="item.lan_doc"> · {{ item.lan_doc }}</span>
+            · {{ item.line_count }} 条
+          </template>
         </span>
       </span>
     </button>

@@ -28,23 +28,26 @@ from app.services.folder_store import (
     get_folder,
     update_folder,
 )
+from app.services.platform import detect_platform
 from app.services.subtitle_store import (
     build_library_tree,
     delete_records,
     export_records,
     find_by_bvid_page,
     find_by_dedupe_key,
+    find_by_xhs_note_id,
     get_record,
     list_records,
     move_records_on_folder_delete,
     move_records_to_folder,
     upsert_record,
 )
+from app.services.xiaohongshu import XhsError, fetch_note, format_note_text, parse_xhs_ref
 
 router = APIRouter(prefix="/api/v1/subtitle", tags=["subtitle"])
 
 
-def _build_response(
+def _build_bilibili_response(
     result,
     *,
     source_url: str = "",
@@ -69,6 +72,7 @@ def _build_response(
     ]
 
     return SubtitleExtractResponse(
+        source="bilibili",
         bvid=result.bvid,
         aid=result.aid,
         cid=result.cid,
@@ -88,12 +92,41 @@ def _build_response(
     )
 
 
+def _build_xhs_response(
+    result,
+    *,
+    source_url: str = "",
+    record_id: str | None = None,
+    duplicate: bool = False,
+    existing_record_id: str | None = None,
+) -> SubtitleExtractResponse:
+    return SubtitleExtractResponse(
+        source="xiaohongshu",
+        note_id=result.note_id,
+        note_type=result.note_type,
+        author=result.author,
+        tags=list(result.tags),
+        images=list(result.images),
+        title=result.title,
+        page=1,
+        page_title=result.note_type,
+        text=format_note_text(title=result.title, desc=result.desc, tags=result.tags),
+        need_login=result.need_login,
+        hint=result.hint,
+        record_id=record_id,
+        source_url=source_url,
+        duplicate=duplicate,
+        existing_record_id=existing_record_id,
+    )
+
+
 def _response_from_record(
     rec: dict,
     *,
     source_url: str = "",
     duplicate: bool = False,
 ) -> SubtitleExtractResponse:
+    source = rec.get("source") or "bilibili"
     track = rec.get("selected_track")
     selected = SubtitleTrack.model_validate(track) if track else None
     lines = [
@@ -104,9 +137,15 @@ def _response_from_record(
     ]
     rid = rec.get("id")
     return SubtitleExtractResponse(
+        source=source,
         bvid=rec.get("bvid") or "",
         aid=int(rec.get("aid") or 0),
         cid=int(rec.get("cid") or 0),
+        note_id=rec.get("note_id") or "",
+        note_type=rec.get("note_type") or "",
+        author=rec.get("author") or "",
+        tags=list(rec.get("tags") or []),
+        images=list(rec.get("images") or []),
         title=rec.get("title") or "",
         page=int(rec.get("page") or 1),
         page_title=rec.get("page_title") or "",
@@ -125,10 +164,16 @@ def _payload_from_response(body: SubtitleSaveRequest | SubtitleExtractResponse) 
     track = body.selected_track.model_dump() if body.selected_track else None
     lines = [ln.model_dump(by_alias=True) for ln in body.lines]
     return {
+        "source": getattr(body, "source", "bilibili") or "bilibili",
         "source_url": getattr(body, "source_url", "") or "",
         "bvid": body.bvid,
         "aid": body.aid,
         "cid": body.cid,
+        "note_id": getattr(body, "note_id", "") or "",
+        "note_type": getattr(body, "note_type", "") or "",
+        "author": getattr(body, "author", "") or "",
+        "tags": list(getattr(body, "tags", []) or []),
+        "images": list(getattr(body, "images", []) or []),
         "title": body.title,
         "page": body.page,
         "page_title": body.page_title,
@@ -138,14 +183,19 @@ def _payload_from_response(body: SubtitleSaveRequest | SubtitleExtractResponse) 
     }
 
 
-def _find_existing_for_extract(url: str, page: int, lang: str | None) -> dict | None:
+def _summary_from_saved(saved: dict) -> dict:
+    from app.services.subtitle_store import _summary
+
+    return _summary(saved)
+
+
+def _find_existing_bilibili(url: str, page: int, lang: str | None) -> dict | None:
     try:
         ref = parse_bilibili_ref(url)
     except BilibiliError:
         return None
     bvid = ref.bvid
     if not bvid and ref.aid:
-        # ponytail: aid-only 链接无法本地去重，需走 B 站 API 解析 bvid
         return None
     if not bvid:
         return None
@@ -162,28 +212,49 @@ def _find_existing_for_extract(url: str, page: int, lang: str | None) -> dict | 
     return records[0]
 
 
+def _find_existing_xhs(url: str) -> dict | None:
+    try:
+        ref = parse_xhs_ref(url)
+    except XhsError:
+        return None
+    return find_by_xhs_note_id(ref.note_id)
+
+
+def _find_existing_for_extract(url: str, page: int, lang: str | None) -> dict | None:
+    try:
+        platform = detect_platform(url)
+    except ValueError:
+        return None
+    if platform == "xiaohongshu":
+        return _find_existing_xhs(url)
+    return _find_existing_bilibili(url, page, lang)
+
+
 @router.post("/extract", response_model=SubtitleExtractResponse)
 def extract_subtitle(body: SubtitleExtractRequest) -> SubtitleExtractResponse:
     source_url = body.url.strip()
 
+    try:
+        platform = detect_platform(source_url)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     if not body.force:
         existing = _find_existing_for_extract(source_url, body.page, body.lang)
         if existing:
-            return _response_from_record(
-                existing,
-                source_url=source_url,
-                duplicate=True,
-            )
+            return _response_from_record(existing, source_url=source_url, duplicate=True)
 
     try:
-        result = fetch_subtitles(body.url, page=body.page, lang=body.lang)
-    except BilibiliError as exc:
+        if platform == "xiaohongshu":
+            result = fetch_note(source_url)
+            resp = _build_xhs_response(result, source_url=source_url)
+        else:
+            result = fetch_subtitles(source_url, page=body.page, lang=body.lang)
+            resp = _build_bilibili_response(result, source_url=source_url)
+    except (BilibiliError, XhsError) as exc:
         status = 401 if exc.need_login else 400
         raise HTTPException(status_code=status, detail=str(exc)) from exc
 
-    resp = _build_response(result, source_url=source_url)
-
-    # ponytail: 提取成功即落盘，与前端「自动保存」一致
     payload = _payload_from_response(resp)
     if body.folder_id is not None or body.force:
         payload["folder_id"] = body.folder_id
@@ -196,27 +267,7 @@ def extract_subtitle(body: SubtitleExtractRequest) -> SubtitleExtractResponse:
 @router.post("/save", response_model=SubtitleRecordSummary)
 def save_subtitle(body: SubtitleSaveRequest) -> SubtitleRecordSummary:
     saved = upsert_record(_payload_from_response(body))
-    return SubtitleRecordSummary.model_validate(
-        {
-            "id": saved["id"],
-            "bvid": saved["bvid"],
-            "title": saved["title"],
-            "page": saved["page"],
-            "page_title": saved["page_title"],
-            "line_count": saved["line_count"],
-            "lan_doc": (saved.get("selected_track") or {}).get("lan_doc")
-            or (saved.get("selected_track") or {}).get("lan")
-            or "",
-            "source_url": saved.get("source_url") or "",
-            "created_at": saved.get("created_at") or "",
-            "updated_at": saved.get("updated_at") or "",
-        }
-    )
-
-
-@router.get("/records", response_model=list[SubtitleRecordSummary])
-def list_subtitle_records() -> list[SubtitleRecordSummary]:
-    return [SubtitleRecordSummary.model_validate(x) for x in list_records()]
+    return SubtitleRecordSummary.model_validate(_summary_from_saved(saved))
 
 
 @router.get("/records", response_model=list[SubtitleRecordSummary])
@@ -315,7 +366,7 @@ def batch_export_records(body: BatchExportRequest) -> BatchExportResponse:
 
 
 def _api_self_check() -> None:
-    """ponytail: TestClient 冒烟，不调用 B 站外网。"""
+    """ponytail: TestClient 冒烟，不调用 B 站 / 小红书外网。"""
     from fastapi.testclient import TestClient
 
     from app.main import app
@@ -327,6 +378,7 @@ def _api_self_check() -> None:
     rid = upsert_record(
         {
             "source_url": "https://example.com/v",
+            "source": "bilibili",
             "bvid": "BV1test00001",
             "aid": 1,
             "cid": 2,
@@ -347,9 +399,28 @@ def _api_self_check() -> None:
     assert body["duplicate"] is True
     assert body["existing_record_id"] == rid
 
+    xhs_id = "656abc123def456789012346"
+    xhs_rid = upsert_record(
+        {
+            "source": "xiaohongshu",
+            "note_id": xhs_id,
+            "title": "小红书API自检",
+            "note_type": "normal",
+            "tags": ["测试"],
+            "text": "正文",
+            "source_url": f"https://www.xiaohongshu.com/explore/{xhs_id}",
+        }
+    )["id"]
+    xhs_dup = client.post(
+        "/api/v1/subtitle/extract",
+        json={"url": f"https://www.xiaohongshu.com/explore/{xhs_id}"},
+    )
+    assert xhs_dup.status_code == 200
+    assert xhs_dup.json()["duplicate"] is True
+
     tree = client.get("/api/v1/subtitle/tree")
     assert tree.status_code == 200
-    assert tree.json()["total_count"] >= 1
+    assert tree.json()["total_count"] >= 2
 
     folder = client.post("/api/v1/subtitle/folders", json={"name": "API测试夹"})
     assert folder.status_code == 200
@@ -372,7 +443,7 @@ def _api_self_check() -> None:
 
     deleted = client.post(
         "/api/v1/subtitle/records/batch-delete",
-        json={"ids": [rid]},
+        json={"ids": [rid, xhs_rid]},
     )
     assert deleted.status_code == 200
     assert rid in deleted.json()["deleted"]

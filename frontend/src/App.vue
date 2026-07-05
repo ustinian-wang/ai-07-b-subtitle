@@ -109,13 +109,13 @@
 
     <main class="main">
       <header class="head">
-        <h1>B 站字幕提取</h1>
-        <p class="hint">粘贴视频链接，提取后自动保存到左侧字幕库</p>
+        <h1>内容提取</h1>
+        <p class="hint">粘贴 B 站视频或小红书笔记链接，提取后自动保存到左侧内容库</p>
       </header>
 
       <section v-if="duplicatePrompt" class="panel duplicate">
         <p>
-          本地已有该视频字幕记录
+          本地已有该记录
           <strong>#{{ duplicatePrompt.existing_record_id }}</strong>
           （{{ duplicatePrompt.title }}）
         </p>
@@ -129,21 +129,24 @@
       </section>
 
       <section class="panel">
-        <label class="label" for="url">视频链接</label>
+        <label class="label" for="url">链接</label>
         <input
           id="url"
           v-model="url"
           class="input"
           type="text"
-          placeholder="https://www.bilibili.com/video/BVxxxx 或 b23.tv 短链"
+          placeholder="B 站 BV 链接 / b23.tv 短链，或小红书 xhslink / explore 链接"
           @keyup.enter="extract(false)"
         />
 
         <div class="row">
-          <label class="label inline" for="page">分 P</label>
-          <input id="page" v-model.number="page" class="input short" type="number" min="1" />
+          <span v-if="urlPlatform" class="platform-tag">{{ urlPlatformLabel }}</span>
+          <template v-if="urlPlatform !== 'xiaohongshu'">
+            <label class="label inline" for="page">分 P</label>
+            <input id="page" v-model.number="page" class="input short" type="number" min="1" />
+          </template>
           <button class="btn primary" :disabled="loading" @click="extract(false)">
-            {{ loading ? '提取中…' : '提取字幕' }}
+            {{ loading ? '提取中…' : extractButtonLabel }}
           </button>
         </div>
 
@@ -153,15 +156,39 @@
       <section v-if="result" class="panel result">
         <h2 class="title">{{ result.title }}</h2>
         <p class="meta">
-          {{ result.bvid }} · P{{ result.page }}
-          <span v-if="result.page_title">（{{ result.page_title }}）</span>
-          · {{ result.lines.length }} 条
-          <span v-if="result.selected_track">
-            · {{ result.selected_track.lan_doc || result.selected_track.lan }}
-          </span>
+          <span class="source-badge">{{ result.source === 'xiaohongshu' ? '小红书' : 'B站' }}</span>
+          <template v-if="result.source === 'xiaohongshu'">
+            {{ result.note_id || '—' }}
+            · {{ result.note_type === 'video' ? '视频' : '图文' }}
+            <span v-if="result.author"> · {{ result.author }}</span>
+            <span v-if="result.tags && result.tags.length"> · {{ result.tags.length }} 标签</span>
+          </template>
+          <template v-else>
+            {{ result.bvid }} · P{{ result.page }}
+            <span v-if="result.page_title">（{{ result.page_title }}）</span>
+            · {{ result.lines.length }} 条
+            <span v-if="result.selected_track">
+              · {{ result.selected_track.lan_doc || result.selected_track.lan }}
+            </span>
+          </template>
           <span v-if="result.record_id"> · 已保存 #{{ result.record_id }}</span>
           <span v-if="result.duplicate" class="dup-tag">来自本地库</span>
         </p>
+
+        <div v-if="result.source === 'xiaohongshu' && result.tags && result.tags.length" class="tracks">
+          <span v-for="tag in result.tags" :key="tag" class="tag">#{{ tag }}</span>
+        </div>
+
+        <div v-if="result.source === 'xiaohongshu' && result.images && result.images.length" class="xhs-images">
+          <img
+            v-for="(img, idx) in result.images.slice(0, 6)"
+            :key="img + idx"
+            :src="img"
+            alt=""
+            class="xhs-thumb"
+            loading="lazy"
+          />
+        </div>
 
         <div v-if="result.tracks.length > 1" class="tracks">
           <span class="label inline">字幕轨：</span>
@@ -243,6 +270,35 @@ export default {
         width: `${this.marquee.w}px`,
         height: `${this.marquee.h}px`,
       };
+    },
+    urlPlatform() {
+      const text = (this.url || '').trim().toLowerCase();
+      if (!text) return '';
+      if (
+        text.includes('xiaohongshu.com') ||
+        text.includes('xhslink.com') ||
+        text.includes('xhs.cn')
+      ) {
+        return 'xiaohongshu';
+      }
+      if (
+        text.includes('bilibili.com') ||
+        text.includes('b23.tv') ||
+        text.includes('bili2233.cn') ||
+        /bv[a-z0-9]{10}/i.test(text) ||
+        /\bav\d+\b/i.test(text)
+      ) {
+        return 'bilibili';
+      }
+      return '';
+    },
+    urlPlatformLabel() {
+      if (this.urlPlatform === 'xiaohongshu') return '识别：小红书笔记';
+      if (this.urlPlatform === 'bilibili') return '识别：B 站视频';
+      return '';
+    },
+    extractButtonLabel() {
+      return this.urlPlatform === 'xiaohongshu' ? '提取笔记' : '提取字幕';
     },
   },
   mounted() {
@@ -1003,6 +1059,36 @@ body {
   margin: 0 0 12px;
   color: #9aa3c7;
   font-size: 0.88rem;
+}
+.source-badge {
+  display: inline-block;
+  margin-right: 6px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: #243055;
+  color: #a8b8ff;
+  font-size: 0.75rem;
+}
+.platform-tag {
+  padding: 4px 10px;
+  border-radius: 6px;
+  background: #1c2440;
+  color: #9aa3c7;
+  font-size: 0.8rem;
+}
+.xhs-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.xhs-thumb {
+  width: 88px;
+  height: 88px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid #252b48;
+  background: #0f1220;
 }
 .dup-tag {
   color: #7ddea2;
