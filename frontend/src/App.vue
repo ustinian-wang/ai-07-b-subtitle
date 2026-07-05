@@ -1,5 +1,18 @@
 <template>
-  <div class="layout">
+  <div class="app-shell">
+    <button
+      v-if="view === 'main'"
+      type="button"
+      class="top-settings"
+      title="设置"
+      @click="view = 'settings'"
+    >
+      设置
+    </button>
+
+    <SettingsPage v-if="view === 'settings'" @back="view = 'main'" />
+
+    <div v-else class="layout">
     <aside class="sidebar">
       <div class="sidebar-head">
         <h2>字幕库</h2>
@@ -164,14 +177,19 @@
         <pre class="pre">{{ result.text }}</pre>
       </section>
     </main>
+    </div>
   </div>
 </template>
 
 <script>
+import SettingsPage from './SettingsPage.vue';
+
 export default {
   name: 'App',
+  components: { SettingsPage },
   data() {
     return {
+      view: 'main',
       url: '',
       page: 1,
       loading: false,
@@ -399,6 +417,27 @@ body {
   font-family: system-ui, -apple-system, sans-serif;
   background: #0f1220;
   color: #e8ecff;
+}
+.app-shell {
+  position: relative;
+  min-height: 100vh;
+}
+.top-settings {
+  position: fixed;
+  top: 16px;
+  right: 20px;
+  z-index: 100;
+  padding: 8px 14px;
+  border: 1px solid #3d4a7a;
+  border-radius: 8px;
+  background: #1c2440;
+  color: #e8ecff;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+.top-settings:hover {
+  background: #243055;
+  border-color: #3b5bdb;
 }
 .layout {
   display: flex;

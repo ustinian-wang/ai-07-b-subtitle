@@ -56,6 +56,7 @@ npm install && npm run dev
   - `DELETE /api/v1/subtitle/records/{id}`
   - `POST /api/v1/subtitle/records/batch-delete` — body: `{"ids":["id1","id2"]}`
   - `POST /api/v1/subtitle/records/batch-export` — body: `{"ids":["id1"],"format":"txt"}`（`format` 可为 `txt` / `json`）
+- 设置（UI 右上角入口）：`GET/PATCH /api/v1/settings` — 仅 `bilibili_sessdata`，存 `backend/data/settings.json`
 
 ## 自检
 

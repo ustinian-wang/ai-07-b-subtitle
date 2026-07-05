@@ -5,11 +5,13 @@ import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.v1.settings import router as settings_router
 from app.api.v1.subtitle import router as subtitle_router
 from app.config import load_settings, settings
 
 app = FastAPI(title="ai-07-b-subtitle", version="0.1.0")
 app.include_router(subtitle_router)
+app.include_router(settings_router)
 
 app.add_middleware(
     CORSMiddleware,

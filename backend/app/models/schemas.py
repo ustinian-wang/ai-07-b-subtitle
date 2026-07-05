@@ -91,3 +91,12 @@ class BatchDeleteResponse(BaseModel):
     ok: bool = True
     deleted: list[str] = []
     failed: list[str] = []
+
+
+class SettingsPublic(BaseModel):
+    bilibili_sessdata_configured: bool = False
+    bilibili_sessdata_masked: str = ""
+
+
+class SettingsPatchRequest(BaseModel):
+    bilibili_sessdata: str | None = None

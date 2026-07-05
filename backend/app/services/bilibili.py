@@ -12,6 +12,8 @@ from urllib.parse import parse_qs, urlencode, urlparse
 
 import httpx
 
+from app.services import settings_store
+
 BV_RE = re.compile(r"(BV[a-zA-Z0-9]{10})", re.I)
 AV_RE = re.compile(r"\bav(\d+)\b", re.I)
 AID_RE = re.compile(r"[?&]aid=(\d+)", re.I)
@@ -163,6 +165,7 @@ def _resolve_short_link(url: str, client: httpx.Client) -> str:
     return url
 
 
+
 def fetch_subtitles(
     raw_url: str,
     *,
@@ -171,7 +174,7 @@ def fetch_subtitles(
     sessdata: str | None = None,
     timeout: float = 20.0,
 ) -> SubtitleResult:
-    sessdata = sessdata or os.getenv("BILIBILI_SESSDATA", "").strip() or None
+    sessdata = sessdata or settings_store.get_bilibili_sessdata()
     headers = _client_headers(sessdata)
 
     with httpx.Client(
@@ -229,7 +232,7 @@ def fetch_subtitles(
             view_subs = list((data.get("subtitle") or {}).get("list") or [])
             if need_login and not sessdata:
                 hint = (
-                    "未获取到字幕：请在 backend/.env 配置 BILIBILI_SESSDATA（浏览器 Cookie）。"
+                    "未获取到字幕：请在右上角「设置」中配置 BILIBILI SESSDATA（浏览器 Cookie）。"
                     "部分 AI/CC 字幕仅登录后可见。"
                 )
                 raise BilibiliError(hint, need_login=True)
