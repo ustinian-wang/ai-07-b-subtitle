@@ -7,7 +7,8 @@ class SubtitleExtractRequest(BaseModel):
     url: str = Field(..., min_length=4, description="B 站视频链接或 BV/av 号")
     page: int = Field(1, ge=1, description="分 P 序号，从 1 开始")
     lang: str | None = Field(None, description="优先字幕语言，如 zh-CN / ai-zh")
-    save: bool = Field(False, description="提取成功后自动保存到本地库")
+    save: bool = Field(True, description="提取成功后自动保存到本地库")
+    force: bool = Field(False, description="强制重新提取，忽略本地已有记录")
 
 
 class SubtitleLine(BaseModel):
@@ -39,6 +40,8 @@ class SubtitleExtractResponse(BaseModel):
     hint: str = ""
     record_id: str | None = None
     source_url: str = ""
+    duplicate: bool = False
+    existing_record_id: str | None = None
 
 
 class SubtitleRecordSummary(BaseModel):
@@ -65,3 +68,26 @@ class SubtitleSaveRequest(BaseModel):
     selected_track: SubtitleTrack | None = None
     lines: list[SubtitleLine]
     text: str
+
+
+class BatchIdsRequest(BaseModel):
+    ids: list[str] = Field(..., min_length=1)
+
+
+class BatchExportRequest(BaseModel):
+    ids: list[str] = Field(..., min_length=1)
+    format: str = Field("txt", pattern="^(txt|json)$", description="导出格式：txt 或 json")
+
+
+class BatchExportResponse(BaseModel):
+    format: str
+    content: str
+    filename: str
+    count: int = 0
+    missing: list[str] = []
+
+
+class BatchDeleteResponse(BaseModel):
+    ok: bool = True
+    deleted: list[str] = []
+    failed: list[str] = []

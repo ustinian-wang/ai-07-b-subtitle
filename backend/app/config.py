@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(extra="ignore")
 
     backend_port: int = 8907
-    backend_host: str = "127.0.0.1"
+    backend_host: str = "0.0.0.0"
 
 
 load_settings()

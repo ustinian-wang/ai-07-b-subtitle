@@ -7,7 +7,7 @@ export default defineConfig(({ mode }) => {
   const proxy = { '/api': { target, changeOrigin: true } };
   return {
     plugins: [vue()],
-    server: { host: '127.0.0.1', port: 9177, proxy },
-    preview: { host: '127.0.0.1', port: 9177, proxy },
+    server: { host: true, port: 9177, proxy },
+    preview: { host: true, port: 9177, proxy },
   };
 });
