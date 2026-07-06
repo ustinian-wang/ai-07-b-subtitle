@@ -26,6 +26,8 @@ if TYPE_CHECKING:
 _CLASSIFY_RE = re.compile(r"分类|整理|分城市|自动分类|重新分类|按城市")
 _MOVE_RE = re.compile(r"移|搬|放|归|入到|放进")
 _UNCAT_RE = re.compile(r"未分类")
+_MATCH_EXISTING_RE = re.compile(r"命中现有|现有文件夹|一定要|直接移动|真正执行|按.*匹配")
+_AUTO_EXECUTE_RE = re.compile(r"直接移动|立刻执行|马上执行|真正执行|按.*执行|执行移动")
 
 _PLANNER_SYSTEM = """你是笔记库变更规划器。只输出 JSON，不要其它文字。
 
@@ -81,9 +83,16 @@ def plan_classify(
     history: list[dict[str, Any]],
     *,
     auto_execute: bool,
+    user_message: str = "",
 ) -> dict[str, Any]:
     eff_ref, eff_folder = resolve_classify_refs(ref_ids, folder_ids, history)
-    analysis = build_classify_plan(eff_ref, eff_folder, history)
+    match_existing = bool(_MATCH_EXISTING_RE.search(user_message or ""))
+    analysis = build_classify_plan(
+        eff_ref,
+        eff_folder,
+        history,
+        match_existing_folders=match_existing,
+    )
     actionable = plan_actionable_work(analysis)
     plan = plan_from_classify_actionable(analysis, actionable)
     plan["requires_confirmation"] = not auto_execute
@@ -95,6 +104,11 @@ def plan_classify(
             "skip_unknown": len(analysis.get("skip_unknown") or []),
         },
     }
+    if auto_execute and not plan.get("steps"):
+        hist_plan = build_move_plan_from_history(history, user_message)
+        if hist_plan and hist_plan.get("steps"):
+            hist_plan["requires_confirmation"] = False
+            return hist_plan
     return plan
 
 
@@ -167,9 +181,12 @@ def plan_for_confirm(
     history: list[dict[str, Any]],
     user_message: str,
 ) -> dict[str, Any] | None:
-    if pending_plan and pending_plan.get("steps") is not None:
+    if pending_plan and pending_plan.get("steps"):
         return pending_plan
-    return build_move_plan_from_history(history, user_message)
+    hist_plan = build_move_plan_from_history(history, user_message)
+    if hist_plan and hist_plan.get("steps"):
+        return hist_plan
+    return pending_plan
 
 
 async def plan_mutate(
@@ -185,13 +202,25 @@ async def plan_mutate(
 ) -> dict[str, Any]:
     goal = mutate_goal or infer_mutate_goal(user_message)
 
-    if goal == "classify_by_city":
-        return plan_classify(ref_ids, folder_ids, history, auto_execute=auto_execute)
-
     if goal == "move_records":
         move_plan = plan_move(user_message, history, auto_execute=auto_execute)
         if move_plan:
             return move_plan
+
+    if goal == "classify_by_city":
+        classify_plan = plan_classify(
+            ref_ids,
+            folder_ids,
+            history,
+            auto_execute=auto_execute,
+            user_message=user_message,
+        )
+        if classify_plan.get("steps") or not auto_execute:
+            return classify_plan
+        move_plan = plan_move(user_message, history, auto_execute=auto_execute)
+        if move_plan:
+            return move_plan
+        return classify_plan
 
     # generic：LLM 结构化规划
     context = _planner_context(user_message, history, ref_ids, folder_ids)
@@ -248,7 +277,11 @@ def presentation_hint(plan: dict[str, Any]) -> str:
     meta = plan.get("meta") or {}
     if not steps:
         reason = meta.get("reason") or "当前无需执行写库操作"
-        return f"请用 Markdown 说明现状，不要调用工具。原因：{reason}"
+        return (
+            f"请用 Markdown 说明现状与可操作建议，不要调用工具。"
+            f"若 assistant 历史里已有移动映射表，应复述该表供用户确认。"
+            f"原因：{reason}"
+        )
     if goal == "classify_by_city":
         return (
             "请基于下方方案 JSON 用 Markdown 表格展示分类计划（新建文件夹、移动、跳过项）。"

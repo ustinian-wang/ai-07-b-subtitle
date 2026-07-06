@@ -68,6 +68,9 @@ def cities_in_title(title: str) -> list[str]:
 
 
 def _is_collection_note(title: str, cities: list[str]) -> bool:
+    # ponytail: 已识别出单一城市时仍可移动，避免「周边城市」等词误伤
+    if len(cities) == 1:
+        return False
     if any(h in title for h in _COLLECTION_HINTS):
         return True
     if len(cities) >= 2:
@@ -78,14 +81,60 @@ def _is_collection_note(title: str, cities: list[str]) -> bool:
     return False
 
 
-def analyze_record(note_id: str) -> dict[str, Any] | None:
+def _pick_existing_folder(cities: list[str], name_to_id: dict[str, str]) -> str | None:
+    """多城笔记：取第一个命中已有文件夹的城市名。"""
+    for city in cities:
+        if city.lower() in name_to_id:
+            return city
+    return None
+
+
+def augment_with_existing_folder_matches(plan: dict[str, Any]) -> dict[str, Any]:
+    """将 skip_collection 中「多城但命中已有文件夹」的笔记转为可移动。"""
+    name_to_id = _folder_name_index()
+    still_skip: list[dict[str, Any]] = []
+    movable = list(plan.get("movable") or [])
+    moved_ids = {x["id"] for x in movable}
+
+    for item in plan.get("skip_collection") or []:
+        cities = item.get("cities") or []
+        fname = _pick_existing_folder(cities, name_to_id)
+        if fname and item.get("id") not in moved_ids:
+            movable.append(
+                {
+                    "id": item["id"],
+                    "title": item.get("title") or "",
+                    "folder_name": fname,
+                    "folder_id": name_to_id.get(fname.lower()),
+                }
+            )
+            moved_ids.add(item["id"])
+        else:
+            still_skip.append(item)
+
+    out = dict(plan)
+    out["movable"] = movable
+    out["skip_collection"] = still_skip
+    return out
+
+
+def analyze_record(note_id: str, *, include_body: bool = False) -> dict[str, Any] | None:
     rec = get_record(note_id)
     if not rec:
         return None
     title = _title_of(rec)
     cities = cities_in_title(title)
+    if include_body and len(cities) != 1:
+        body = (rec.get("text") or "")[:3000]
+        body_cities = cities_in_title(body)
+        if body_cities:
+            cities = body_cities
     base = {"id": note_id, "title": title, "cities": cities}
+    name_to_id = _folder_name_index()
     if _is_collection_note(title, cities):
+        fname = _pick_existing_folder(cities, name_to_id)
+        if fname:
+            return {**base, "action": "move", "folder_name": fname}
         return {**base, "action": "skip_collection", "reason": "多城/合集/待定，勿单城移动"}
     if len(cities) == 1:
         return {**base, "action": "move", "folder_name": cities[0]}
@@ -212,21 +261,37 @@ def classify_plan_hint(
     )
 
 
+def _wants_body_classify(history: list[dict[str, str]] | None) -> bool:
+    """用户是否要求基于正文分类。"""
+    for msg in reversed(history or []):
+        if msg.get("role") != "user":
+            continue
+        text = msg.get("content") or ""
+        if re.search(r"读取|正文|内容|根据笔记", text):
+            return True
+        if len([m for m in (history or []) if m.get("role") == "user"]) > 3:
+            break
+    return False
+
+
 def build_classify_plan(
     reference_record_ids: list[str] | None = None,
     reference_folder_ids: list[str] | None = None,
     history: list[dict[str, str]] | None = None,
+    *,
+    match_existing_folders: bool = False,
 ) -> dict[str, Any]:
     ref_ids, folder_ids = resolve_classify_refs(reference_record_ids, reference_folder_ids, history)
     record_ids = collect_record_ids(ref_ids, folder_ids)
     name_to_id = _folder_name_index()
+    include_body = _wants_body_classify(history)
     movable: list[dict[str, Any]] = []
     skip_collection: list[dict[str, Any]] = []
     skip_unknown: list[dict[str, Any]] = []
     folders_to_create: set[str] = set()
 
     for rid in record_ids:
-        row = analyze_record(rid)
+        row = analyze_record(rid, include_body=include_body)
         if not row:
             continue
         action = row.get("action")
@@ -249,7 +314,7 @@ def build_classify_plan(
         else:
             skip_unknown.append({"id": row["id"], "title": row["title"]})
 
-    return {
+    plan = {
         "total_scanned": len(record_ids),
         "movable": movable,
         "skip_collection": skip_collection,
@@ -257,6 +322,9 @@ def build_classify_plan(
         "folders_to_create": sorted(folders_to_create),
         "existing_folders": [{"name": n, "id": i} for n, i in sorted(name_to_id.items())],
     }
+    if match_existing_folders:
+        plan = augment_with_existing_folder_matches(plan)
+    return plan
 
 
 def build_classify_plan_block(
@@ -406,10 +474,11 @@ def execution_summary(steps: list[dict[str, Any]], plan: dict[str, Any]) -> str:
 def _self_check() -> None:
     assert cities_in_title("韩国釜山旅行攻略") == ["釜山"]
     assert cities_in_title("首尔仁川一日游")[0] in ("首尔", "仁川")
-    multi = analyze_record  # noqa: F841
     title = "韩国十城合集"
     assert _is_collection_note(title, cities_in_title(title))
-    plan = build_classify_plan([], [UNCATEGORIZED_FOLDER_ID])
+    title2 = "别再只玩首尔，周边城市一样精彩"
+    assert not _is_collection_note(title2, ["首尔"])
+    plan = build_classify_plan([], [UNCATEGORIZED_FOLDER_ID], match_existing_folders=True)
     assert "total_scanned" in plan
     assert is_uncategorized_folder_id(UNCATEGORIZED_FOLDER_ID)
 

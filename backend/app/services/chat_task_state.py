@@ -39,6 +39,8 @@ _CONFIRM_EXACT = frozenset(
 )
 _DENY_PREFIX = ("不", "别", "不要", "取消", "算了", "不用")
 _ID_IN_TEXT = re.compile(r"(?:#|`|\()([a-f0-9]{12})\)?", re.I)
+_TABLE_ROW_ID = re.compile(r"`([a-f0-9]{12})`", re.I)
+_TABLE_ROW_BOLD = re.compile(r"\*\*([^*]+)\*\*")
 
 
 def _is_denial(text: str) -> bool:
@@ -62,6 +64,8 @@ def detect_confirmation(
     if t in _CONFIRM_EXACT:
         return True
     if any(t == k or t.startswith(k) for k in ("可以", "好的", "确认执行")):
+        return True
+    if re.search(r"直接移动|真正执行|立刻执行|马上执行|执行移动", t):
         return True
     # ponytail: 有待确认方案时，短句非否定回复视为确认
     if pending_plan or awaiting_confirmation:
@@ -114,6 +118,55 @@ def infer_folder_name_from_text(*texts: str) -> str | None:
     return None
 
 
+def extract_move_mappings_from_text(text: str) -> list[tuple[str, str]]:
+    """从 assistant Markdown 表格解析 (record_id, folder_name)。"""
+    mappings: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    known = {
+        (f.get("name") or "").strip().lower(): f.get("name")
+        for f in list_folders()
+        if f.get("name")
+    }
+    for line in (text or "").splitlines():
+        if not line.strip().startswith("|"):
+            continue
+        if re.match(r"^\|[-\s|:]+\|$", line.strip()):
+            continue
+        if "ID" in line and ("标题" in line or "建议" in line):
+            continue
+        rid_m = _TABLE_ROW_ID.search(line)
+        if not rid_m:
+            continue
+        rid = rid_m.group(1).lower()
+        folder = None
+        for bold in reversed(_TABLE_ROW_BOLD.findall(line)):
+            candidate = bold.split("（")[0].split("(")[0].strip()
+            resolved = chat_tools.resolve_folder_name(candidate)
+            if resolved:
+                folder = resolved
+                break
+            if candidate.lower() in known:
+                folder = known[candidate.lower()]
+                break
+        if folder and (rid, folder) not in seen:
+            seen.add((rid, folder))
+            mappings.append((rid, folder))
+    return mappings
+
+
+def build_move_plan_from_mappings(mappings: list[tuple[str, str]]) -> dict[str, Any] | None:
+    if not mappings:
+        return None
+    groups: dict[str, list[str]] = defaultdict(list)
+    for rid, folder in mappings:
+        groups[folder].append(rid)
+    steps: list[dict[str, Any]] = []
+    for folder, ids in groups.items():
+        resolved = chat_tools.resolve_folder_name(folder) or folder
+        steps.append({"tool": "move_records", "args": {"ids": ids, "folder_name": resolved}})
+    return {"goal": "move_records", "steps": steps, "meta": {"record_count": len(mappings)}}
+
+
 def build_move_plan_from_history(
     history: list[dict[str, Any]],
     user_message: str,
@@ -123,8 +176,14 @@ def build_move_plan_from_history(
     for m in reversed(history):
         if m.get("role") == "assistant":
             assistant_texts.append(m.get("content") or "")
-        if len(assistant_texts) >= 2:
+        if len(assistant_texts) >= 3:
             break
+
+    for text in assistant_texts:
+        mappings = extract_move_mappings_from_text(text)
+        if mappings:
+            return build_move_plan_from_mappings(mappings)
+
     ids = extract_ids_from_text(user_message, *assistant_texts)
     folder = infer_folder_name_from_text(user_message, *assistant_texts)
     if not ids or not folder:
@@ -242,8 +301,11 @@ def execute_plan(plan: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, 
 
 def offer_move_plan_from_assistant(assistant_text: str) -> dict[str, Any] | None:
     """assistant 提供移动建议时，尝试生成 pending_plan。"""
-    if not re.search(r"移动|移入|归入|放入|搬到", assistant_text or ""):
+    if not re.search(r"移动|移入|归入|放入|搬到|建议移动", assistant_text or ""):
         return None
+    mappings = extract_move_mappings_from_text(assistant_text)
+    if mappings:
+        return build_move_plan_from_mappings(mappings)
     ids = extract_ids_from_text(assistant_text)
     folder = infer_folder_name_from_text(assistant_text)
     if not ids or not folder:
@@ -272,6 +334,21 @@ def _self_check() -> None:
     )
     assert plan and plan["steps"][0]["tool"] == "move_records"
     assert plan["steps"][0]["args"]["folder_name"] == "首尔"
+    table_plan = build_move_plan_from_history(
+        [
+            {
+                "role": "assistant",
+                "content": (
+                    "| ID | 标题 | 建议移动到 |\n"
+                    "|---|---|---|\n"
+                    "| `7368ee9aac7f` | a | **首尔** |\n"
+                    "| `83407f062c80` | b | **江原道** |"
+                ),
+            }
+        ],
+        "直接移动",
+    )
+    assert table_plan and len(table_plan["steps"]) == 2
     empty = plan_from_classify_actionable({"skip_collection": [], "skip_unknown": []}, {"has_work": False})
     assert empty["goal"] == "classify" and empty["meta"].get("reason")
     uncat = build_move_to_uncategorized_plan(["abc123"])

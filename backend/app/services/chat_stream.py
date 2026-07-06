@@ -605,6 +605,12 @@ async def sse_chat_stream(
                 ref_ids=ref_ids,
                 folder_ids=folder_ids,
             )
+            if route.auto_execute and not plan.get("steps"):
+                from app.services.chat_task_state import build_move_plan_from_history
+
+                hist_plan = build_move_plan_from_history(history, user_message)
+                if hist_plan and hist_plan.get("steps"):
+                    plan = {**hist_plan, "requires_confirmation": False}
             if plan.get("requires_confirmation") and plan.get("steps"):
                 async for chunk in _stream_present_plan(
                     client, model, thread_id, user_message, history, ref_ids, folder_ids, plan
