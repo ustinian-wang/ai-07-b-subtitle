@@ -62,9 +62,42 @@ def save_messages(thread_id: str, messages: list[dict[str, str]]) -> dict[str, A
         "updated_at": now,
         "title": _derive_title(messages),
         "messages": _normalize(messages),
+        "task_state": prev.get("task_state") if isinstance(prev.get("task_state"), dict) else {},
     }
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     return payload
+
+
+def get_task_state(thread_id: str) -> dict[str, Any]:
+    snap = _read_thread_file(_thread_path(thread_id)) or {}
+    ts = snap.get("task_state")
+    return dict(ts) if isinstance(ts, dict) else {}
+
+
+def save_task_state(thread_id: str, task_state: dict[str, Any] | None) -> None:
+    path = _thread_path(thread_id)
+    snap = _read_thread_file(path) or {
+        "thread_id": thread_id,
+        "created_at": _now_iso(),
+        "messages": [],
+    }
+    snap["task_state"] = task_state if isinstance(task_state, dict) else {}
+    snap["updated_at"] = _now_iso()
+    path.write_text(json.dumps(snap, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def set_pending_plan(thread_id: str, plan: dict[str, Any] | None) -> None:
+    state = get_task_state(thread_id)
+    if plan:
+        state["pending_plan"] = plan
+    else:
+        state.pop("pending_plan", None)
+    save_task_state(thread_id, state)
+
+
+def get_pending_plan(thread_id: str) -> dict[str, Any] | None:
+    plan = get_task_state(thread_id).get("pending_plan")
+    return plan if isinstance(plan, dict) else None
 
 
 def append_exchange(thread_id: str, user: str, assistant: str) -> list[dict[str, Any]]:
@@ -210,6 +243,10 @@ def _self_check() -> None:
     assert any(x["thread_id"] == tid for x in listed)
     row = next(x for x in listed if x["thread_id"] == tid)
     assert row["message_count"] == 5
+    set_pending_plan(tid, {"goal": "test", "steps": []})
+    assert get_pending_plan(tid)["goal"] == "test"
+    set_pending_plan(tid, None)
+    assert get_pending_plan(tid) is None
     delete_thread(tid)
     assert get_messages(tid) == []
 

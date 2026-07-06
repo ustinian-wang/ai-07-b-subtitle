@@ -20,6 +20,13 @@ from app.services.chat_classify_plan import (
     resolve_classify_refs,
 )
 from app.services.chat_intent import TurnIntent, infer_turn_intent, tool_choice_for_round
+from app.services.chat_task_state import (
+    build_move_plan_from_history,
+    detect_confirmation,
+    execute_plan,
+    offer_move_plan_from_assistant,
+    plan_from_classify_actionable,
+)
 from app.services.subtitle_store import get_record, infer_source, list_record_ids_in_folder
 from app.services.folder_store import get_folder, is_uncategorized_folder_id
 
@@ -332,6 +339,58 @@ def _tool_ok(result: str) -> bool:
     return True
 
 
+async def _stream_pending_plan(
+    client: AsyncOpenAI,
+    model: str,
+    thread_id: str,
+    user_message: str,
+    history: list[dict[str, Any]],
+    ref_ids: list[str],
+    folder_ids: list[str],
+    pending: dict[str, Any],
+) -> AsyncIterator[str]:
+    """执行 pending_plan 并流式回复。"""
+    exec_steps, summary = execute_plan(pending)
+    tool_steps: list[dict[str, Any]] = []
+    for step in exec_steps:
+        name = step["name"]
+        meta = _tool_step_dict(name)
+        ok = bool(step.get("ok", True))
+        preview = str(step.get("preview") or "")
+        yield f"data: {json.dumps({'tool_start': _tool_sse_start(name)}, ensure_ascii=False)}\n\n"
+        tool_steps.append({**meta, "ok": ok, "preview": preview, "status": "done"})
+        yield f"data: {json.dumps({'tool_end': {'name': name, 'ok': ok, 'preview': preview}}, ensure_ascii=False)}\n\n"
+
+    turn = TurnIntent(mode="write", execute_tools=True)
+    messages = build_messages(history, user_message, ref_ids, folder_ids, turn=turn)
+    messages.append(
+        {
+            "role": "user",
+            "content": (
+                f"系统已执行确认方案，结果 JSON：\n{json.dumps(summary, ensure_ascii=False)}\n"
+                "请用 Markdown 简要汇报：移动了多少条、是否有失败、未包含在方案中的笔记说明。"
+            ),
+        }
+    )
+    full = ""
+    stream = await client.chat.completions.create(model=model, messages=messages, stream=True)
+    async for event in stream:
+        choice = event.choices[0] if event.choices else None
+        if not choice:
+            continue
+        piece = choice.delta.content or ""
+        if piece:
+            full += piece
+            yield f"data: {json.dumps({'delta': piece}, ensure_ascii=False)}\n\n"
+    if not full.strip():
+        moved = summary.get("records_moved", 0)
+        full = f"已执行确认方案，成功移动 {moved} 条笔记。"
+        yield f"data: {json.dumps({'delta': full}, ensure_ascii=False)}\n\n"
+    chat_store.append_turn(thread_id, user_message, full, tool_steps or None)
+    chat_store.set_pending_plan(thread_id, None)
+    yield f"data: {json.dumps({'done': True}, ensure_ascii=False)}\n\n"
+
+
 async def sse_chat_stream(
     thread_id: str,
     message: str,
@@ -348,6 +407,18 @@ async def sse_chat_stream(
     try:
         history = chat_store.get_messages(thread_id)
         client, model = _llm_client()
+
+        if detect_confirmation(user_message):
+            pending = chat_store.get_pending_plan(thread_id) or build_move_plan_from_history(
+                history, user_message
+            )
+            if pending and pending.get("steps"):
+                async for chunk in _stream_pending_plan(
+                    client, model, thread_id, user_message, history, ref_ids, folder_ids, pending
+                ):
+                    yield chunk
+                return
+
         hint = classify_plan_hint(ref_ids, folder_ids, history)
         turn = await infer_turn_intent(
             client,
@@ -361,6 +432,7 @@ async def sse_chat_stream(
         messages = build_messages(history, user_message, ref_ids, folder_ids, turn=turn)
         full = ""
         tool_steps: list[dict[str, Any]] = []
+        pending_to_save: dict[str, Any] | None = None
 
         # ponytail: 分类编排 — LLM 判 execute_tools，服务端执行 create/move
         if turn.is_classify:
@@ -398,6 +470,7 @@ async def sse_chat_stream(
                 else:
                     hint_msg += "用户若确认执行，可回复要求落库。"
                 messages.append({"role": "user", "content": hint_msg})
+                pending_to_save = plan_from_classify_actionable(plan, actionable)
 
             stream = await client.chat.completions.create(
                 model=model,
@@ -420,6 +493,10 @@ async def sse_chat_stream(
                 else:
                     full = "当前引用范围内没有需要移动的笔记，分类已是最新状态。"
                 yield f"data: {json.dumps({'delta': full}, ensure_ascii=False)}\n\n"
+            if turn.execute_tools:
+                chat_store.set_pending_plan(thread_id, None)
+            else:
+                chat_store.set_pending_plan(thread_id, pending_to_save)
             chat_store.append_turn(thread_id, user_message, full, tool_steps or None)
             yield f"data: {json.dumps({'done': True}, ensure_ascii=False)}\n\n"
             return
@@ -533,7 +610,10 @@ async def sse_chat_stream(
             full = "（模型未返回内容；若需操作笔记库，请确认模型支持 function calling。）"
             yield f"data: {json.dumps({'delta': full}, ensure_ascii=False)}\n\n"
 
+        offer = offer_move_plan_from_assistant(full)
         chat_store.append_turn(thread_id, user_message, full, tool_steps or None)
+        if offer:
+            chat_store.set_pending_plan(thread_id, offer)
         yield f"data: {json.dumps({'done': True}, ensure_ascii=False)}\n\n"
     except Exception as err:  # noqa: BLE001
         yield f"data: {json.dumps({'error': str(err)}, ensure_ascii=False)}\n\n"
