@@ -32,6 +32,8 @@ REF_CHAR_LIMIT = 12000
 # ponytail: 分类引用合计上限；超出则截断并标注
 FOLDER_REF_TOTAL_CHAR_LIMIT = 48000
 _MAX_TOOL_ROUNDS = 5
+# ponytail: 非 stream LLM 回复分块大小，保持前端流式体验
+_DELTA_CHUNK_SIZE = 48
 
 _http_client: httpx.AsyncClient | None = None
 
@@ -343,6 +345,14 @@ def _tool_ok(result: str) -> bool:
     return True
 
 
+def _yield_text_deltas(text: str, chunk_size: int = _DELTA_CHUNK_SIZE):
+    """非 stream LLM 全文回复时分块 yield delta SSE。"""
+    if not text:
+        return
+    for i in range(0, len(text), chunk_size):
+        yield f"data: {json.dumps({'delta': text[i : i + chunk_size]}, ensure_ascii=False)}\n\n"
+
+
 async def _stream_execute_plan(
     client: AsyncOpenAI,
     model: str,
@@ -489,6 +499,9 @@ async def _stream_query_tools(
             if piece:
                 full += piece
                 yield f"data: {json.dumps({'delta': piece}, ensure_ascii=False)}\n\n"
+    else:
+        for chunk in _yield_text_deltas(full):
+            yield chunk
 
     if not full.strip():
         full = "（模型未返回内容。）"
