@@ -1,0 +1,48 @@
+backend/app/services/chat_stream.py
+  s_736c93b51a67e7::t_7ec3178d288ac4 222-226,230-231,233,236-237,242,262,264,266-267,283-286,294
+  s_736c93b51a67e7::t_9bb7073fe316a9 150,155,160-161,165
+  s_736c93b51a67e7::t_5fc4d05674f02b 16,21
+  s_736c93b51a67e7::t_79bdda87a16ff2 311
+backend/app/services/chat_intent.py
+  s_736c93b51a67e7::t_e8f6b51ca3bbe1 6,8-9
+  s_736c93b51a67e7::t_2cf9703a77ecea 81
+  s_736c93b51a67e7::t_1eea6bcd682641 1,4-5,7,10-43,45-80,82,88-109,111-112,116-117,122-126
+backend/app/services/chat_classify_plan.py
+  s_736c93b51a67e7::t_132b1ad11ef8bc 301
+  s_736c93b51a67e7::t_595d3ecfc2c782 234,237,239-240,247,250
+  s_736c93b51a67e7::t_9feddf13bad6ce 286-287,289
+  s_736c93b51a67e7::t_0aae4b60855058 364-365,367
+  s_736c93b51a67e7::t_9877f58f2eb945 81-82,87,91
+  s_736c93b51a67e7::t_e518bb3623a78d 179-180,184
+  s_736c93b51a67e7::t_7bed04a8071949 198-214
+backend/app/services/chat_tools.py
+  s_736c93b51a67e7::t_c1f17d1550814c 160,164,167,171-175,178
+  s_736c93b51a67e7::t_d868a52769eee9 313,315-318
+  s_736c93b51a67e7::t_3f0fa37e7fbc21 280,282
+  s_736c93b51a67e7::t_2946348f2356e8 378
+  s_736c93b51a67e7::t_cda920b61ca19b 430,439,441
+  s_736c93b51a67e7::t_97d19b14e335cf 447,449
+  s_736c93b51a67e7::t_5bdf81c0cf3673 464-466
+  s_736c93b51a67e7::t_9396d835e5c28e 58-107
+  s_736c93b51a67e7::t_297201939aadba 204,207,210,220,223,227
+  s_736c93b51a67e7::t_04e5602a04a24d 358-360
+  s_736c93b51a67e7::t_e21eae48d74883 240
+  s_736c93b51a67e7::t_72db977e8a5176 130,134,136
+  s_736c93b51a67e7::t_f0ab0b2307e776 191-192
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "1ecdb019e335377fcc8992425047807289ec67c1",
+  "prompts": {},
+  "sessions": {
+    "s_736c93b51a67e7": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "d38e583a-0c3d-4908-afcb-77ee91a8bf78",
+        "model": "default"
+      },
+      "human_author": "jser <87244899@qq.com>"
+    }
+  }
+}
