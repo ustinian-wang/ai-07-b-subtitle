@@ -16,7 +16,7 @@
 - **笔记库侧栏**：目录树（未分类置顶）、来源标签（B站 / 小红书）、批量移动/导出/删除
 - **右侧对话助手**：SSE 流式对话、会话列表与持久化；**@ 引用** / **拖拽**库内笔记作为上下文
 - **设置页**：B 站 **SESSDATA**、小红书 **Cookie**、**OpenAI/GPT** 对话配置
-- **开发热更**：`scripts/dev.sh dev` 或 `uvicorn --reload` + Vite HMR
+- **开发热更**：`pm2 start ecosystem.config.cjs`（uvicorn `--reload` + Vite HMR）
 
 ## 目录结构
 
@@ -38,21 +38,22 @@ ai-07-b-subtitle/
 │   ├── src/App.vue          # 主界面 + 笔记库侧栏 + 对话面板
 │   ├── src/ChatPanel.vue    # 右侧对话助手
 │   └── src/SettingsPage.vue # 设置页
-├── scripts/dev.sh           # start | stop | restart | dev | status
+├── ecosystem.config.cjs     # pm2 启停（backend + frontend）
 └── README.md
 ```
 
 ## 开发
 
-### 一键启停（推荐）
+### 一键启停（pm2）
 
 ```bash
 cd projects/ai-07-b-subtitle   # 或 clone 后的项目根目录
-chmod +x scripts/dev.sh
-./scripts/dev.sh dev           # 前台 + 热更（改代码自动生效）
-./scripts/dev.sh restart       # 后台运行
-./scripts/dev.sh status        # 查看状态
-./scripts/dev.sh stop          # 停止
+pm2 start ecosystem.config.cjs    # 后台 + 热更
+pm2 status                        # 查看状态
+pm2 logs                          # 查看日志
+pm2 restart ecosystem.config.cjs  # 重启
+pm2 stop ecosystem.config.cjs     # 停止
+pm2 delete ecosystem.config.cjs   # 从 pm2 列表移除
 ```
 
 ### 手动启动
@@ -73,7 +74,7 @@ npm install && npm run dev -- --host 0.0.0.0 --port 9177
 | 前端地址 | http://localhost:9177 |
 | 健康检查 | `GET /api/health` |
 | 热更 | 后端 `backend/app/`；前端 Vite HMR |
-| 日志（脚本后台模式） | `.run/logs/` |
+| 日志 | `pm2 logs` |
 
 ## 配置：B 站 SESSDATA
 
