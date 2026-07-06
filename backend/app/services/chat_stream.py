@@ -171,9 +171,32 @@ def build_messages(
 
     messages: list[dict[str, Any]] = [{"role": "system", "content": system}]
     for m in history:
-        messages.append({"role": m["role"], "content": m["content"]})
+        role = m.get("role")
+        if role == "tools":
+            continue
+        if role in ("user", "assistant"):
+            messages.append({"role": role, "content": m.get("content") or ""})
     messages.append({"role": "user", "content": user_message})
     return messages
+
+
+def _tool_step_dict(name: str) -> dict[str, str]:
+    cat = chat_tools.tool_category(name)
+    return {
+        "name": name,
+        "label": chat_tools.tool_label(name),
+        "category_label": chat_tools.TOOL_CATEGORIES.get(cat, {}).get("label", ""),
+    }
+
+
+def _tool_sse_start(name: str) -> dict[str, str]:
+    meta = _tool_step_dict(name)
+    return {
+        "name": meta["name"],
+        "label": meta["label"],
+        "category": chat_tools.tool_category(name),
+        "category_label": meta["category_label"],
+    }
 
 
 def _tool_preview(result: str) -> str:
@@ -232,6 +255,7 @@ async def sse_chat_stream(
         )
         messages = build_messages(history, user_message, ref_ids, folder_ids, turn=turn)
         full = ""
+        tool_steps: list[dict[str, Any]] = []
 
         # ponytail: 分类编排 — LLM 判 execute_tools，服务端执行 create/move
         if turn.is_classify:
@@ -243,8 +267,12 @@ async def sse_chat_stream(
                 steps, plan = apply_classify_plan(eff_ref_ids, eff_folder_ids, history)
                 for step in steps:
                     name = step["name"]
-                    yield f"data: {json.dumps({'tool_start': {'name': name, 'label': chat_tools.tool_label(name), 'category': chat_tools.tool_category(name), 'category_label': chat_tools.TOOL_CATEGORIES.get(chat_tools.tool_category(name), {}).get('label', '')}}, ensure_ascii=False)}\n\n"
-                    yield f"data: {json.dumps({'tool_end': {'name': name, 'ok': step.get('ok', True), 'preview': step.get('preview', '')}}, ensure_ascii=False)}\n\n"
+                    meta = _tool_step_dict(name)
+                    yield f"data: {json.dumps({'tool_start': _tool_sse_start(name)}, ensure_ascii=False)}\n\n"
+                    ok = bool(step.get("ok", True))
+                    preview = str(step.get("preview") or "")
+                    tool_steps.append({**meta, "ok": ok, "preview": preview, "status": "done"})
+                    yield f"data: {json.dumps({'tool_end': {'name': name, 'ok': ok, 'preview': preview}}, ensure_ascii=False)}\n\n"
 
                 summary = execution_summary(steps, plan)
                 messages.append(
@@ -287,7 +315,7 @@ async def sse_chat_stream(
                 else:
                     full = "当前引用范围内没有需要移动的笔记，分类已是最新状态。"
                 yield f"data: {json.dumps({'delta': full}, ensure_ascii=False)}\n\n"
-            chat_store.append_exchange(thread_id, user_message, full)
+            chat_store.append_turn(thread_id, user_message, full, tool_steps or None)
             yield f"data: {json.dumps({'done': True}, ensure_ascii=False)}\n\n"
             return
 
@@ -339,11 +367,14 @@ async def sse_chat_stream(
                 except json.JSONDecodeError:
                     args = {}
 
-                yield f"data: {json.dumps({'tool_start': {'name': tool_name, 'label': chat_tools.tool_label(tool_name), 'category': chat_tools.tool_category(tool_name), 'category_label': chat_tools.TOOL_CATEGORIES.get(chat_tools.tool_category(tool_name), {}).get('label', '')}}, ensure_ascii=False)}\n\n"
+                yield f"data: {json.dumps({'tool_start': _tool_sse_start(tool_name)}, ensure_ascii=False)}\n\n"
 
                 result = chat_tools.execute(tool_name, args)
                 ok = _tool_ok(result)
-                yield f"data: {json.dumps({'tool_end': {'name': tool_name, 'ok': ok, 'preview': _tool_preview(result)}}, ensure_ascii=False)}\n\n"
+                preview = _tool_preview(result)
+                meta = _tool_step_dict(tool_name)
+                tool_steps.append({**meta, "ok": ok, "preview": preview, "status": "done"})
+                yield f"data: {json.dumps({'tool_end': {'name': tool_name, 'ok': ok, 'preview': preview}}, ensure_ascii=False)}\n\n"
 
                 messages.append(
                     {
@@ -379,7 +410,7 @@ async def sse_chat_stream(
             full = "（模型未返回内容；若需操作笔记库，请确认模型支持 function calling。）"
             yield f"data: {json.dumps({'delta': full}, ensure_ascii=False)}\n\n"
 
-        chat_store.append_exchange(thread_id, user_message, full)
+        chat_store.append_turn(thread_id, user_message, full, tool_steps or None)
         yield f"data: {json.dumps({'done': True}, ensure_ascii=False)}\n\n"
     except Exception as err:  # noqa: BLE001
         yield f"data: {json.dumps({'error': str(err)}, ensure_ascii=False)}\n\n"

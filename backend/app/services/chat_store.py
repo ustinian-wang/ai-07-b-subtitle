@@ -67,9 +67,21 @@ def save_messages(thread_id: str, messages: list[dict[str, str]]) -> dict[str, A
     return payload
 
 
-def append_exchange(thread_id: str, user: str, assistant: str) -> list[dict[str, str]]:
+def append_exchange(thread_id: str, user: str, assistant: str) -> list[dict[str, Any]]:
+    return append_turn(thread_id, user, assistant, tool_steps=None)
+
+
+def append_turn(
+    thread_id: str,
+    user: str,
+    assistant: str,
+    tool_steps: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
     msgs = get_messages(thread_id)
     msgs.append({"role": "user", "content": user})
+    steps = _normalize_steps(tool_steps or [])
+    if steps:
+        msgs.append({"role": "tools", "steps": steps})
     msgs.append({"role": "assistant", "content": assistant})
     save_messages(thread_id, msgs)
     return msgs
@@ -138,10 +150,39 @@ def delete_thread(thread_id: str) -> bool:
     return True
 
 
-def _normalize(raw: list[dict[str, Any]]) -> list[dict[str, str]]:
-    out: list[dict[str, str]] = []
+def _normalize_step(raw: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "name": str(raw.get("name") or ""),
+        "label": str(raw.get("label") or raw.get("name") or ""),
+        "category_label": str(raw.get("category_label") or raw.get("categoryLabel") or ""),
+        "ok": bool(raw.get("ok", True)),
+        "preview": str(raw.get("preview") or ""),
+        "status": str(raw.get("status") or "done"),
+    }
+
+
+def _normalize_steps(raw: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    if not raw:
+        return []
+    out: list[dict[str, Any]] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        step = _normalize_step(item)
+        if step["name"]:
+            out.append(step)
+    return out
+
+
+def _normalize(raw: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
     for m in raw:
         role = str(m.get("role", ""))
+        if role == "tools":
+            steps = _normalize_steps(m.get("steps") if isinstance(m.get("steps"), list) else [])
+            if steps:
+                out.append({"role": "tools", "steps": steps})
+            continue
         if role not in ("user", "assistant"):
             continue
         content = m.get("content")
@@ -155,9 +196,20 @@ def _self_check() -> None:
     tid = create_thread()
     append_exchange(tid, "你好", "你好，有什么可以帮你？")
     assert len(get_messages(tid)) == 2
+    append_turn(
+        tid,
+        "查一下",
+        "已列出笔记。",
+        tool_steps=[{"name": "list_records", "label": "列出笔记", "ok": True, "preview": "count=3"}],
+    )
+    msgs = get_messages(tid)
+    assert len(msgs) == 5
+    assert msgs[3]["role"] == "tools"
+    assert msgs[3]["steps"][0]["name"] == "list_records"
     listed = list_threads()
     assert any(x["thread_id"] == tid for x in listed)
-    assert listed[0]["message_count"] == 2
+    row = next(x for x in listed if x["thread_id"] == tid)
+    assert row["message_count"] == 5
     delete_thread(tid)
     assert get_messages(tid) == []
 

@@ -184,9 +184,19 @@ class ChatRequest(BaseModel):
     reference_folder_ids: list[str] = Field(default_factory=list)
 
 
+class ChatToolStep(BaseModel):
+    name: str
+    label: str = ""
+    category_label: str = ""
+    ok: bool = True
+    preview: str = ""
+    status: str = "done"
+
+
 class ChatMessage(BaseModel):
     role: str
-    content: str
+    content: str = ""
+    steps: list[ChatToolStep] = Field(default_factory=list)
 
 
 class ChatMessagesResponse(BaseModel):

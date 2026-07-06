@@ -60,10 +60,22 @@
       <article
         v-for="(m, idx) in messages"
         :key="idx"
-        :class="['chat-msg', m.role === 'user' ? 'chat-msg--user' : 'chat-msg--assistant']"
+        :class="[
+          'chat-msg',
+          m.role === 'user' ? 'chat-msg--user' : m.role === 'tools' ? 'chat-msg--tools' : 'chat-msg--assistant',
+        ]"
       >
-        <div class="chat-role">{{ m.role === 'user' ? '你' : '助手' }}</div>
-        <div class="chat-bubble">
+        <div class="chat-role">{{ messageRoleLabel(m) }}</div>
+        <div v-if="m.role === 'tools'" class="chat-bubble chat-bubble--tools">
+          <p v-for="(step, i) in m.steps || []" :key="`${step.name}-${i}`" class="tool-step">
+            <span class="tool-step-cat">{{ step.category_label || step.categoryLabel }}</span>
+            {{ step.label || step.name }}
+            <span v-if="step.status === 'running'" class="tool-step-status">执行中…</span>
+            <span v-else-if="step.ok" class="tool-step-status ok">✓ {{ step.preview }}</span>
+            <span v-else class="tool-step-status err">✗ {{ step.preview }}</span>
+          </p>
+        </div>
+        <div v-else class="chat-bubble">
           <template v-for="(seg, si) in parseMessageContent(m.content)" :key="`${idx}-${si}`">
             <span v-if="seg.type === 'text'" class="chat-text">{{ seg.text }}</span>
             <button
@@ -329,6 +341,11 @@ export default {
     document.removeEventListener('click', this.onToolsOutsideClick, true);
   },
   methods: {
+    messageRoleLabel(m) {
+      if (m.role === 'user') return '你';
+      if (m.role === 'tools') return '工具';
+      return '助手';
+    },
     toggleSessions() {
       if (this.busy) return;
       this.sessionsOpen = !this.sessionsOpen;
@@ -866,6 +883,19 @@ export default {
               this.scrollToBottom();
             }
             if (payload.done) {
+              if (this.toolSteps.length) {
+                this.messages.push({
+                  role: 'tools',
+                  steps: this.toolSteps.map((s) => ({
+                    name: s.name,
+                    label: s.label,
+                    category_label: s.categoryLabel,
+                    ok: s.ok,
+                    preview: s.preview,
+                    status: s.status,
+                  })),
+                });
+              }
               this.messages.push({ role: 'assistant', content: this.streamBuffer });
               this.streamBuffer = '';
               this.toolSteps = [];
