@@ -1,0 +1,64 @@
+backend/app/services/agent/router.py
+  s_736c93b51a67e7::t_6dcebe343280e7 72
+  s_736c93b51a67e7::t_d9c7d65676fee6 1-71,73-159
+backend/app/services/chat_store.py
+  s_27bdc20d4a34da::t_14d55b79cba187 89-106,113
+backend/app/services/agent/memory.py
+  s_736c93b51a67e7::t_feb42774e377d2 1-49
+backend/app/services/chat_tools.py
+  s_27bdc20d4a34da::t_edeb367db02da7 701-703
+  s_27bdc20d4a34da::t_23a06257485c30 5
+  s_27bdc20d4a34da::t_699010fdb5ec10 98
+  s_736c93b51a67e7::t_7c870f04fee23b 709-711
+  s_736c93b51a67e7::t_bc0172d21e13b7 697
+  s_736c93b51a67e7::t_ea09d4b507f7f5 47
+  s_736c93b51a67e7::t_d5d47e389de8d2 76,83,86-95
+  s_27bdc20d4a34da::t_dda60ee71e2197 99-124,128-129,131
+  s_736c93b51a67e7::t_aff9c561045fde 231-233
+  s_736c93b51a67e7::t_7c5d02a3844446 477-490,492-499,501-551
+  s_736c93b51a67e7::t_7a7b676a303b3d 240-245,255-273
+  s_736c93b51a67e7::t_d5664db69fdbd1 274
+  s_736c93b51a67e7::t_1c3ed158c2210b 96-97
+backend/app/services/chat_stream.py
+  s_736c93b51a67e7::t_609a9c010bb733 266,272,275
+  s_736c93b51a67e7::t_2bc3f872b41362 14-18
+  s_736c93b51a67e7::t_839a85e98692af 346,354,356-357,368-405,410-411,426-494,497-524
+  s_736c93b51a67e7::t_fdfbdd43bc9c45 534-536,547-548,550,555-556,560-565,567-573,575-580,584-593,595-612,614-619,621-624
+  s_736c93b51a67e7::t_976dcff599f46d 574
+  s_27bdc20d4a34da::t_34e3339d07fe63 251-254
+  s_736c93b51a67e7::t_632df4cca4464b 13
+  s_736c93b51a67e7::t_8d3f1053b8828c 231-250,255
+  s_736c93b51a67e7::t_9b1b180b2d98f2 322-327
+backend/app/services/agent/planner.py
+  s_736c93b51a67e7::t_c15d26d6a2d497 1-289
+backend/app/services/agent/__init__.py
+  s_736c93b51a67e7::t_9f3606b1102482 1
+backend/app/services/chat_task_state.py
+  s_27bdc20d4a34da::t_2170fee3e6cade 10,20-21,23,33-37,40,44-58,64-70,84-90,98,100,103-105,108-111,138-152,154-159,187,260-262,264-266,275-278
+backend/app/services/agent/executor.py
+  s_736c93b51a67e7::t_81573a1bfe7c48 1-23
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "3614f59efe81e34a364c4c543c926678319e4c21",
+  "prompts": {},
+  "sessions": {
+    "s_27bdc20d4a34da": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "a2c31446-104f-4747-bf3a-e44aa33b291c",
+        "model": "default"
+      },
+      "human_author": "jser <87244899@qq.com>"
+    },
+    "s_736c93b51a67e7": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "d38e583a-0c3d-4908-afcb-77ee91a8bf78",
+        "model": "default"
+      },
+      "human_author": "jser <87244899@qq.com>"
+    }
+  }
+}
