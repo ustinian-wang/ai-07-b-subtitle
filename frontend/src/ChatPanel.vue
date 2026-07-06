@@ -22,7 +22,7 @@
           class="btn tiny"
           :class="{ 'btn--active': sessionsOpen }"
           :disabled="busy"
-          @click="sessionsOpen = !sessionsOpen"
+          @click="toggleSessions"
         >
           历史{{ sessions.length ? ` (${sessions.length})` : '' }}
         </button>
@@ -138,6 +138,40 @@
         >
           引用当前
         </button>
+        <div ref="toolsAnchor" class="chat-tools-anchor">
+          <button
+            type="button"
+            class="btn tiny"
+            :class="{ 'btn--active': toolsOpen }"
+            title="查看助手可调用的工具"
+            @click.stop="toggleTools"
+          >
+            工具{{ toolTotal ? ` (${toolTotal})` : '' }}
+          </button>
+          <div v-if="toolsOpen" class="tools-popover" @click.stop>
+            <div class="tools-popover-head">
+              <strong>助手工具</strong>
+              <span class="tools-popover-meta">模型可自动调用</span>
+            </div>
+            <p v-if="toolsLoading" class="tools-popover-empty">加载中…</p>
+            <p v-else-if="toolsError" class="tools-popover-empty tools-popover-empty--err">{{ toolsError }}</p>
+            <template v-else-if="toolCategories.length">
+              <div v-for="cat in toolCategories" :key="cat.id" class="chat-tool-category">
+                <h3 class="chat-tool-cat-title">{{ cat.label }} · {{ cat.count }}</h3>
+                <ul class="chat-tool-list">
+                  <li v-for="t in cat.tools" :key="t.name" class="chat-tool-item">
+                    <div class="chat-tool-head">
+                      <code class="chat-tool-name">{{ t.name }}</code>
+                      <span class="chat-tool-label">{{ t.label }}</span>
+                    </div>
+                    <p class="chat-tool-desc">{{ t.description }}</p>
+                  </li>
+                </ul>
+              </div>
+            </template>
+            <p v-else class="tools-popover-empty">暂无可用工具</p>
+          </div>
+        </div>
         <button
           type="button"
           class="btn tiny"
@@ -222,6 +256,12 @@ export default {
       threadId: '',
       sessions: [],
       sessionsOpen: false,
+      toolsOpen: false,
+      toolCategories: [],
+      toolTotal: 0,
+      toolsLoading: false,
+      toolsError: '',
+      toolsLoaded: false,
       messages: [],
       refs: [],
       draft: '',
@@ -260,11 +300,64 @@ export default {
         this.ensureThread();
       }
     });
+    this.loadTools();
   },
   beforeUnmount() {
     clearTimeout(this._refHintTimer);
+    document.removeEventListener('click', this.onToolsOutsideClick, true);
   },
   methods: {
+    toggleSessions() {
+      if (this.busy) return;
+      this.sessionsOpen = !this.sessionsOpen;
+    },
+    closeTools() {
+      this.toolsOpen = false;
+      document.removeEventListener('click', this.onToolsOutsideClick, true);
+    },
+    onToolsOutsideClick(e) {
+      const el = this.$refs.toolsAnchor;
+      if (el && !el.contains(e.target)) this.closeTools();
+    },
+    toggleTools() {
+      if (this.toolsOpen) {
+        this.closeTools();
+        return;
+      }
+      this.toolsOpen = true;
+      if (!this.toolsLoaded && !this.toolsLoading) this.loadTools();
+      this.$nextTick(() => {
+        document.addEventListener('click', this.onToolsOutsideClick, true);
+      });
+    },
+    async loadTools() {
+      this.toolsLoading = true;
+      this.toolsError = '';
+      try {
+        const resp = await fetch('/api/v1/chat/tools');
+        const text = await resp.text();
+        let data = {};
+        if (text && text.trim()) {
+          try {
+            data = JSON.parse(text);
+          } catch {
+            throw new Error(`服务器返回非 JSON（${resp.status}）`);
+          }
+        }
+        if (!resp.ok) {
+          throw new Error(data.detail || data.message || `加载失败 (${resp.status})`);
+        }
+        this.toolCategories = data.categories || [];
+        this.toolTotal = data.total_count || 0;
+        this.toolsLoaded = true;
+      } catch (e) {
+        this.toolCategories = [];
+        this.toolTotal = 0;
+        this.toolsError = String(e.message || e);
+      } finally {
+        this.toolsLoading = false;
+      }
+    },
     hasRef(id) {
       return this.refs.some((r) => r.id === id);
     },
@@ -934,6 +1027,95 @@ export default {
   padding: 8px 14px;
   border-top: 1px solid #252b48;
   background: #12162a;
+  position: relative;
+  z-index: 2;
+}
+.chat-tools-anchor {
+  position: relative;
+}
+.tools-popover {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 8px);
+  width: min(320px, calc(100vw - 48px));
+  max-height: min(360px, 50vh);
+  overflow-y: auto;
+  padding: 10px 12px 12px;
+  border: 1px solid #3d4a7a;
+  border-radius: 10px;
+  background: #151a2e;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+  z-index: 30;
+}
+.tools-popover-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #252b48;
+  font-size: 0.82rem;
+  color: #e8ecff;
+}
+.tools-popover-meta {
+  font-size: 0.68rem;
+  color: #7a84a8;
+  white-space: nowrap;
+}
+.tools-popover-empty {
+  margin: 0;
+  padding: 4px 0;
+  color: #7a84a8;
+  font-size: 0.78rem;
+}
+.tools-popover-empty--err {
+  color: #ff8a8a;
+}
+.chat-tool-category + .chat-tool-category {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #1a2038;
+}
+.chat-tool-cat-title {
+  margin: 0 0 6px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #9eb4ff;
+}
+.chat-tool-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.chat-tool-item {
+  padding: 6px 0;
+}
+.chat-tool-item + .chat-tool-item {
+  border-top: 1px dashed #1e2540;
+}
+.chat-tool-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.chat-tool-name {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: #1a2040;
+  color: #8ea4ff;
+  font-size: 0.68rem;
+}
+.chat-tool-label {
+  font-size: 0.78rem;
+  color: #e8ecff;
+}
+.chat-tool-desc {
+  margin: 4px 0 0;
+  font-size: 0.72rem;
+  line-height: 1.4;
+  color: #7a84a8;
 }
 .chat-refs-bar {
   display: flex;
