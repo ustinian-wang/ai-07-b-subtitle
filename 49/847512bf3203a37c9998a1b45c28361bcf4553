@@ -1,0 +1,25 @@
+frontend/src/ChatPanel.vue
+  s_736c93b51a67e7::t_0df6f01e19f3af 25
+  s_736c93b51a67e7::t_c5f6b73bdac1a1 310-313,322-323,326,332-360
+  s_736c93b51a67e7::t_4d893ea10a86d1 141-174
+  s_736c93b51a67e7::t_78c0531e768ed3 1030-1118
+  s_736c93b51a67e7::t_12bd17f417d415 259-264
+  s_736c93b51a67e7::t_3251bc0c667a0c 307,314-321,324-325,327-331
+  s_736c93b51a67e7::t_acfc18c384bc27 303
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "49847512bf3203a37c9998a1b45c28361bcf4553",
+  "prompts": {},
+  "sessions": {
+    "s_736c93b51a67e7": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "d38e583a-0c3d-4908-afcb-77ee91a8bf78",
+        "model": "default"
+      },
+      "human_author": "jser <87244899@qq.com>"
+    }
+  }
+}
