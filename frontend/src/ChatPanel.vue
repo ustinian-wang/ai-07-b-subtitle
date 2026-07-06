@@ -55,7 +55,7 @@
 
     <div ref="scrollRef" class="chat-messages">
       <p v-if="!messages.length" class="chat-empty">
-        发送消息开始对话。可 @ 引用库内笔记、从左侧拖入笔记，或使用「引用当前 / 选中」按钮。
+        发送消息开始对话。可 @ 引用库内笔记、从左侧拖入笔记或分类，或使用「引用当前 / 选中」按钮。
       </p>
       <article
         v-for="(m, idx) in messages"
@@ -67,7 +67,7 @@
           <template v-for="(seg, si) in parseMessageContent(m.content)" :key="`${idx}-${si}`">
             <span v-if="seg.type === 'text'" class="chat-text">{{ seg.text }}</span>
             <button
-              v-else
+              v-else-if="seg.type === 'ref'"
               type="button"
               class="msg-ref"
               :title="`打开笔记：${seg.displayTitle}`"
@@ -83,6 +83,11 @@
               </span>
               <span class="ref-title">{{ seg.displayTitle }}</span>
             </button>
+            <span v-else-if="seg.type === 'folder-ref'" class="msg-ref msg-ref--folder">
+              <span class="ref-folder-icon">📂</span>
+              <span class="ref-folder-label">分类</span>
+              <span class="ref-title">{{ seg.displayName }}</span>
+            </span>
           </template>
         </div>
       </article>
@@ -105,7 +110,7 @@
             <template v-for="(seg, si) in parseMessageContent(streamBuffer)" :key="`stream-${si}`">
               <span v-if="seg.type === 'text'" class="chat-text">{{ seg.text }}</span>
               <button
-                v-else
+                v-else-if="seg.type === 'ref'"
                 type="button"
                 class="msg-ref"
                 :title="`打开笔记：${seg.displayTitle}`"
@@ -121,6 +126,11 @@
                 </span>
                 <span class="ref-title">{{ seg.displayTitle }}</span>
               </button>
+              <span v-else-if="seg.type === 'folder-ref'" class="msg-ref msg-ref--folder">
+                <span class="ref-folder-icon">📂</span>
+                <span class="ref-folder-label">分类</span>
+                <span class="ref-title">{{ seg.displayName }}</span>
+              </span>
             </template>
           </template>
           <span v-else>…</span>
@@ -130,14 +140,6 @@
 
     <div class="chat-refs">
       <div class="chat-refs-bar">
-        <button
-          type="button"
-          class="btn tiny"
-          :disabled="!currentRecordId || hasRef(currentRecordId)"
-          @click="attachCurrent"
-        >
-          引用当前
-        </button>
         <div ref="toolsAnchor" class="chat-tools-anchor">
           <button
             type="button"
@@ -175,23 +177,42 @@
         <button
           type="button"
           class="btn tiny"
+          :disabled="!currentRecordId || hasRef(currentRecordId)"
+          @click="attachCurrent"
+        >
+          引用当前
+        </button>
+        <button
+          type="button"
+          class="btn tiny"
           :disabled="!selectedIds.length"
           @click="attachSelected"
         >
           引用选中 {{ selectedIds.length ? `(${selectedIds.length})` : '' }}
         </button>
-        <span class="chat-refs-hint">@ 引用 · 拖入笔记</span>
+        <span class="chat-refs-hint">@ 引用 · 拖入笔记/分类</span>
       </div>
       <p v-if="refHint" class="chat-ref-toast">{{ refHint }}</p>
       <div v-if="refs.length" class="chat-ref-chips">
-        <span v-for="r in refs" :key="r.id" class="chat-ref-chip">
-          <span
-            :class="['ref-source', r.source === 'xiaohongshu' ? 'ref-source--xhs' : 'ref-source--bili']"
-          >
-            {{ r.source === 'xiaohongshu' ? '小红书' : 'B站' }}
-          </span>
-          <span class="ref-title">{{ r.title || r.id }}</span>
-          <button type="button" class="chip-x" title="移除引用" @click="removeRef(r.id)">×</button>
+        <span
+          v-for="r in refs"
+          :key="refKey(r)"
+          :class="['chat-ref-chip', r.type === 'folder' ? 'chat-ref-chip--folder' : '']"
+        >
+          <template v-if="r.type === 'folder'">
+            <span class="ref-folder-icon">📂</span>
+            <span class="ref-folder-name">{{ r.name }}</span>
+            <span class="ref-folder-count">{{ r.recordCount }} 条</span>
+          </template>
+          <template v-else>
+            <span
+              :class="['ref-source', r.source === 'xiaohongshu' ? 'ref-source--xhs' : 'ref-source--bili']"
+            >
+              {{ r.source === 'xiaohongshu' ? '小红书' : 'B站' }}
+            </span>
+            <span class="ref-title">{{ r.title || r.id }}</span>
+          </template>
+          <button type="button" class="chip-x" title="移除引用" @click="removeRef(refKey(r))">×</button>
         </span>
       </div>
     </div>
@@ -203,7 +224,7 @@
           v-model="draft"
           class="chat-input"
           rows="3"
-          placeholder="输入问题，@ 引用笔记，或从左侧拖入… ⌘/Ctrl+Enter 发送"
+          placeholder="输入问题，@ 引用笔记，或从左侧拖入笔记/分类… ⌘/Ctrl+Enter 发送"
           :disabled="busy"
           @input="onInput"
           @keydown="onKeydown"
@@ -235,8 +256,9 @@
 </template>
 
 <script>
+import { DRAG_FOLDER_MIME, DRAG_RECORD_MIME } from './dragMime.js';
+
 const THREAD_KEY = 'b-subtitle-chat-thread';
-const DRAG_MIME = 'application/x-subtitle-ids';
 
 const MSG_REF_RE = /@\[([^\]]*)\]\(([^)]+)\)/g;
 
@@ -358,16 +380,51 @@ export default {
         this.toolsLoading = false;
       }
     },
+    hasRecordRef(id) {
+      return this.refs.some((r) => r.type !== 'folder' && r.id === id);
+    },
+    hasFolderRef(folderId) {
+      return this.refs.some((r) => r.type === 'folder' && r.folderId === folderId);
+    },
     hasRef(id) {
-      return this.refs.some((r) => r.id === id);
+      return this.hasRecordRef(id);
+    },
+    refKey(r) {
+      return r.type === 'folder' ? `folder:${r.folderId}` : r.id;
     },
     addRef(id, title, source) {
-      if (!id || this.hasRef(id)) return false;
+      if (!id || this.hasRecordRef(id)) return false;
       const rec = this.recordMap[id];
       this.refs.push({
+        type: 'record',
         id,
         title: title || rec?.title || id,
         source: source || rec?.source || 'bilibili',
+      });
+      return true;
+    },
+    addFolderRef(folderId, name, recordCount) {
+      if (!folderId || this.hasFolderRef(folderId)) return false;
+      this.refs.push({
+        type: 'folder',
+        folderId,
+        name: name || folderId,
+        recordCount: recordCount || 0,
+      });
+      return true;
+    },
+    attachFolderAsMention(folderId, name, recordCount) {
+      if (!this.addFolderRef(folderId, name, recordCount)) return false;
+      const insert = `@[分类:${name}](folder:${folderId})`;
+      const prefix = this.draft.length && !/\s$/.test(this.draft) ? ' ' : '';
+      this.draft = `${this.draft}${prefix}${insert} `;
+      this.closeMention();
+      this.$nextTick(() => {
+        const ta = this.$refs.inputRef;
+        if (ta) {
+          ta.focus();
+          ta.setSelectionRange(this.draft.length, this.draft.length);
+        }
       });
       return true;
     },
@@ -419,8 +476,8 @@ export default {
         this.refHint = '';
       }, 2500);
     },
-    removeRef(id) {
-      this.refs = this.refs.filter((r) => r.id !== id);
+    removeRef(key) {
+      this.refs = this.refs.filter((r) => this.refKey(r) !== key);
     },
     attachCurrent() {
       if (!this.currentRecordId) return;
@@ -441,7 +498,7 @@ export default {
       const types = e.dataTransfer?.types;
       if (!types) return false;
       for (let i = 0; i < types.length; i += 1) {
-        if (types[i] === DRAG_MIME) return true;
+        if (types[i] === DRAG_RECORD_MIME || types[i] === DRAG_FOLDER_MIME) return true;
       }
       return false;
     },
@@ -476,7 +533,16 @@ export default {
       e.preventDefault();
       this.dropActive = false;
       this.dropDepth = 0;
-      const raw = e.dataTransfer.getData(DRAG_MIME);
+      const folderRaw = e.dataTransfer.getData(DRAG_FOLDER_MIME);
+      if (folderRaw) {
+        try {
+          this.addFolderRefFromDrag(JSON.parse(folderRaw));
+        } catch {
+          /* ponytail: 非法拖拽数据直接忽略 */
+        }
+        return;
+      }
+      const raw = e.dataTransfer.getData(DRAG_RECORD_MIME);
       if (!raw) return;
       try {
         const parsed = JSON.parse(raw);
@@ -484,6 +550,21 @@ export default {
         this.addRefsFromIds(ids.filter(Boolean));
       } catch {
         /* ponytail: 非法拖拽数据直接忽略 */
+      }
+    },
+    addFolderRefFromDrag(payload) {
+      const folderId = payload?.folder_id;
+      const name = payload?.name || folderId;
+      const count = payload?.record_count ?? (payload?.record_ids?.length || 0);
+      if (!folderId) return;
+      if (!count) {
+        this.showRefHint('文件夹为空');
+        return;
+      }
+      if (this.attachFolderAsMention(folderId, name, count)) {
+        this.showRefHint(`已引用分类：${name}`);
+      } else {
+        this.showRefHint('该分类已在引用中');
       }
     },
     refMeta(id, fallbackTitle) {
@@ -504,11 +585,21 @@ export default {
           segments.push({ type: 'text', text: text.slice(lastIndex, match.index) });
         }
         const id = match[2];
-        segments.push({
-          type: 'ref',
-          id,
-          ...this.refMeta(id, match[1]),
-        });
+        if (id.startsWith('folder:')) {
+          const folderId = id.slice('folder:'.length);
+          const displayName = (match[1] || '').replace(/^分类:/, '') || folderId;
+          segments.push({
+            type: 'folder-ref',
+            folderId,
+            displayName,
+          });
+        } else {
+          segments.push({
+            type: 'ref',
+            id,
+            ...this.refMeta(id, match[1]),
+          });
+        }
         lastIndex = MSG_REF_RE.lastIndex;
         match = MSG_REF_RE.exec(text);
       }
@@ -718,7 +809,8 @@ export default {
           body: JSON.stringify({
             thread_id: this.threadId,
             message: text,
-            reference_record_ids: this.refs.map((r) => r.id),
+            reference_record_ids: this.refs.filter((r) => r.type !== 'folder').map((r) => r.id),
+            reference_folder_ids: this.refs.filter((r) => r.type === 'folder').map((r) => r.folderId),
           }),
         });
 
@@ -1139,6 +1231,46 @@ export default {
   gap: 6px;
   margin-top: 8px;
 }
+.chat-ref-chip--folder {
+  background: #1a2838;
+  border: 1px solid #2d6a4f;
+  color: #b8e0c8;
+}
+.ref-folder-icon {
+  flex-shrink: 0;
+  font-size: 0.72rem;
+  line-height: 1;
+}
+.ref-folder-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  font-weight: 600;
+}
+.ref-folder-count {
+  flex-shrink: 0;
+  padding: 1px 5px;
+  border-radius: 8px;
+  background: rgba(45, 106, 79, 0.35);
+  color: #9fd4b0;
+  font-size: 0.62rem;
+}
+.msg-ref--folder {
+  cursor: default;
+  background: #1a2838;
+  border-color: #2d6a4f;
+  color: #b8e0c8;
+}
+.ref-folder-label {
+  flex-shrink: 0;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(45, 106, 79, 0.35);
+  color: #9fd4b0;
+  font-size: 0.58rem;
+  font-weight: 600;
+}
 .chat-ref-chip {
   display: inline-flex;
   align-items: center;
@@ -1149,6 +1281,7 @@ export default {
   font-size: 0.72rem;
   color: #b8c0e0;
   max-width: 100%;
+  border: 1px solid transparent;
 }
 .ref-source {
   flex-shrink: 0;

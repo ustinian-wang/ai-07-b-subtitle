@@ -28,6 +28,7 @@
         </button>
         <span class="tree-folder-icon">📁</span>
         <span class="tree-folder-name">未分类</span>
+        <span class="tree-folder-system" title="系统分类，不可删除">系统</span>
         <span class="tree-folder-count">{{ uncategorized.length }}</span>
       </div>
       <ul v-if="expandedIds.has('__uncategorized__')" class="tree-children">
@@ -80,6 +81,7 @@
 <script>
 import TreeFolder from './TreeFolder.vue';
 import TreeRecord from './TreeRecord.vue';
+import { DRAG_FOLDER_MIME, UNCATEGORIZED_FOLDER_ID } from './dragMime.js';
 
 export default {
   name: 'LibraryTree',
@@ -117,16 +119,22 @@ export default {
         event.preventDefault();
         return;
       }
-      const ids = this.uncategorized.map((r) => r.id);
-      if (!ids.length) {
+      const recordIds = this.uncategorized.map((r) => r.id);
+      if (!recordIds.length) {
         event.preventDefault();
         this.$emit('folder-ref-drag-empty');
         return;
       }
+      const payload = {
+        folder_id: UNCATEGORIZED_FOLDER_ID,
+        name: '未分类',
+        record_ids: recordIds,
+        record_count: recordIds.length,
+      };
       event.dataTransfer.effectAllowed = 'copy';
-      event.dataTransfer.setData('application/x-subtitle-ids', JSON.stringify(ids));
-      event.dataTransfer.setData('text/plain', `未分类 · ${ids.length} 条笔记`);
-      this.$emit('record-drag-start', { ids, purpose: 'ref' });
+      event.dataTransfer.setData(DRAG_FOLDER_MIME, JSON.stringify(payload));
+      event.dataTransfer.setData('text/plain', `未分类 · ${recordIds.length} 条笔记`);
+      this.$emit('record-drag-start', { purpose: 'folder-ref' });
     },
     onUncatDragEnd() {
       this.$emit('record-drag-end');
@@ -217,6 +225,15 @@ export default {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.tree-folder-system {
+  flex-shrink: 0;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: #243055;
+  color: #8ea4ff;
+  font-size: 0.58rem;
+  font-weight: 600;
 }
 .tree-folder-count {
   flex-shrink: 0;

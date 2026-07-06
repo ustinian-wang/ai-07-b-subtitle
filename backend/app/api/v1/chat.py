@@ -63,7 +63,7 @@ async def chat_stream(body: ChatRequest) -> StreamingResponse:
     tid = (body.thread_id or "").strip() or str(uuid.uuid4())
     chat_store.create_thread(tid)
     return StreamingResponse(
-        sse_chat_stream(tid, body.message, body.reference_record_ids),
+        sse_chat_stream(tid, body.message, body.reference_record_ids, body.reference_folder_ids),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

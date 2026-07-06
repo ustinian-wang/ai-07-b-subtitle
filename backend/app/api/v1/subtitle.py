@@ -26,6 +26,8 @@ from app.services.folder_store import (
     delete_folder,
     descendant_folder_ids,
     get_folder,
+    is_system_folder,
+    resolve_folder_delete_target,
     update_folder,
 )
 from app.services.platform import detect_platform
@@ -293,6 +295,8 @@ def create_subtitle_folder(body: FolderCreateRequest) -> FolderPublic:
 
 @router.patch("/folders/{folder_id}", response_model=FolderPublic)
 def update_subtitle_folder(folder_id: str, body: FolderUpdateRequest) -> FolderPublic:
+    if is_system_folder(folder_id):
+        raise HTTPException(status_code=400, detail="系统文件夹不可修改")
     if not get_folder(folder_id):
         raise HTTPException(status_code=404, detail="文件夹不存在")
     try:
@@ -308,13 +312,16 @@ def update_subtitle_folder(folder_id: str, body: FolderUpdateRequest) -> FolderP
 
 @router.delete("/folders/{folder_id}")
 def remove_subtitle_folder(folder_id: str) -> dict:
+    if is_system_folder(folder_id):
+        raise HTTPException(status_code=400, detail="系统文件夹不可删除")
     item = get_folder(folder_id)
     if not item:
         raise HTTPException(status_code=404, detail="文件夹不存在")
     parent_id = item.get("parent_id")
+    target_id = resolve_folder_delete_target(parent_id)
     removed_ids = {folder_id, *descendant_folder_ids(folder_id)}
     for fid in removed_ids:
-        move_records_on_folder_delete(fid, parent_id)
+        move_records_on_folder_delete(fid, target_id)
     try:
         result = delete_folder(folder_id)
     except ValueError as exc:
@@ -324,7 +331,9 @@ def remove_subtitle_folder(folder_id: str) -> dict:
 
 @router.post("/records/batch-move", response_model=BatchMoveResponse)
 def batch_move_records(body: BatchMoveRequest) -> BatchMoveResponse:
-    if body.folder_id and not get_folder(body.folder_id):
+    from app.services.folder_store import is_uncategorized_folder_id
+
+    if body.folder_id and not is_uncategorized_folder_id(body.folder_id) and not get_folder(body.folder_id):
         raise HTTPException(status_code=400, detail="目标文件夹不存在")
     result = move_records_to_folder(body.ids, body.folder_id)
     return BatchMoveResponse(
@@ -422,6 +431,9 @@ def _api_self_check() -> None:
     tree = client.get("/api/v1/subtitle/tree")
     assert tree.status_code == 200
     assert tree.json()["total_count"] >= 2
+
+    sys_del = client.delete("/api/v1/subtitle/folders/__uncategorized__")
+    assert sys_del.status_code == 400
 
     folder = client.post("/api/v1/subtitle/folders", json={"name": "API测试夹"})
     assert folder.status_code == 200

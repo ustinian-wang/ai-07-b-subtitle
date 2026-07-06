@@ -143,6 +143,9 @@ def save_record(payload: dict[str, Any]) -> dict[str, Any]:
     folder_id = payload.get("folder_id")
     if folder_id is None and existing:
         folder_id = existing.get("folder_id")
+    from app.services.folder_store import normalize_folder_id
+
+    folder_id = normalize_folder_id(folder_id)
 
     if source == "xiaohongshu":
         note_id = payload.get("note_id") or ""
@@ -193,6 +196,35 @@ def list_records() -> list[dict[str, Any]]:
     return items
 
 
+def list_record_ids_in_folder(folder_id: str, *, include_descendants: bool = True) -> list[str]:
+    """列出文件夹内笔记 id；用户文件夹默认含子文件夹，未分类仅直接归属。"""
+    from app.services.folder_store import (
+        UNCATEGORIZED_FOLDER_ID,
+        descendant_folder_ids,
+        get_folder,
+        is_uncategorized_folder_id,
+        normalize_folder_id,
+        user_folder_ids,
+    )
+
+    valid = user_folder_ids()
+    fid = normalize_folder_id(folder_id, valid)
+    target_folders: set[str] = {fid}
+    if include_descendants and not is_uncategorized_folder_id(fid) and get_folder(fid):
+        target_folders |= descendant_folder_ids(fid)
+
+    ids: list[str] = []
+    for path in _records_dir().glob("*.json"):
+        rec = _read_file(path)
+        if not rec:
+            continue
+        rec_fid = normalize_folder_id(rec.get("folder_id"), valid)
+        if rec_fid in target_folders:
+            ids.append(str(rec.get("id") or path.stem))
+    ids.sort()
+    return ids
+
+
 def get_record(record_id: str) -> dict[str, Any] | None:
     return _read_file(_record_path(record_id))
 
@@ -206,6 +238,10 @@ def delete_record(record_id: str) -> bool:
 
 
 def move_records_to_folder(record_ids: list[str], folder_id: str | None) -> dict[str, list[str]]:
+    from app.services.folder_store import normalize_folder_id, user_folder_ids
+
+    valid = user_folder_ids()
+    target = normalize_folder_id(folder_id, valid)
     moved: list[str] = []
     failed: list[str] = []
     for rid in record_ids:
@@ -214,7 +250,7 @@ def move_records_to_folder(record_ids: list[str], folder_id: str | None) -> dict
         if not rec:
             failed.append(rid)
             continue
-        rec["folder_id"] = folder_id
+        rec["folder_id"] = target
         rec["updated_at"] = _now_iso()
         path.write_text(json.dumps(rec, ensure_ascii=False, indent=2), encoding="utf-8")
         moved.append(rid)
@@ -222,15 +258,39 @@ def move_records_to_folder(record_ids: list[str], folder_id: str | None) -> dict
 
 
 def move_records_on_folder_delete(folder_id: str, target_folder_id: str | None) -> int:
+    from app.services.folder_store import normalize_folder_id, user_folder_ids
+
+    valid = user_folder_ids()
+    target = normalize_folder_id(target_folder_id, valid)
     count = 0
     for path in _records_dir().glob("*.json"):
         rec = _read_file(path)
         if rec and rec.get("folder_id") == folder_id:
-            rec["folder_id"] = target_folder_id
+            rec["folder_id"] = target
             rec["updated_at"] = _now_iso()
             path.write_text(json.dumps(rec, ensure_ascii=False, indent=2), encoding="utf-8")
             count += 1
     return count
+
+
+def normalize_orphan_record_folders() -> int:
+    """将 null / 无效 folder_id 的笔记归到未分类，返回修正条数。"""
+    from app.services.folder_store import UNCATEGORIZED_FOLDER_ID, normalize_folder_id, user_folder_ids
+
+    valid = user_folder_ids()
+    fixed = 0
+    for path in _records_dir().glob("*.json"):
+        rec = _read_file(path)
+        if not rec:
+            continue
+        raw_fid = rec.get("folder_id")
+        fid = normalize_folder_id(raw_fid, valid)
+        if raw_fid != fid:
+            rec["folder_id"] = fid
+            rec["updated_at"] = _now_iso()
+            path.write_text(json.dumps(rec, ensure_ascii=False, indent=2), encoding="utf-8")
+            fixed += 1
+    return fixed
 
 
 def delete_records(record_ids: list[str]) -> dict[str, list[str]]:
@@ -303,13 +363,28 @@ def _maybe_persist_source(path: Path, raw: dict[str, Any]) -> None:
 
 
 def build_library_tree() -> dict[str, Any]:
-    from app.services.folder_store import list_folders
+    from app.services.folder_store import (
+        UNCATEGORIZED_FOLDER_ID,
+        list_user_folders,
+        normalize_folder_id,
+        user_folder_ids,
+    )
 
-    folders = list_folders()
-    records = list_records()
-    by_folder: dict[str | None, list[dict[str, Any]]] = {}
-    for rec in records:
-        by_folder.setdefault(rec.get("folder_id"), []).append(rec)
+    normalize_orphan_record_folders()
+    folders = list_user_folders()
+    valid = user_folder_ids()
+    by_folder: dict[str, list[dict[str, Any]]] = {}
+    uncategorized: list[dict[str, Any]] = []
+    for path in _records_dir().glob("*.json"):
+        rec = _read_file(path)
+        if not rec:
+            continue
+        summary = _summary(rec)
+        fid = normalize_folder_id(rec.get("folder_id"), valid)
+        if fid == UNCATEGORIZED_FOLDER_ID:
+            uncategorized.append(summary)
+        else:
+            by_folder.setdefault(fid, []).append(summary)
 
     def sort_records(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
         return sorted(items, key=lambda x: x.get("updated_at") or "", reverse=True)
@@ -326,6 +401,7 @@ def build_library_tree() -> dict[str, Any]:
                     "id": fid,
                     "name": folder.get("name") or "",
                     "parent_id": folder.get("parent_id"),
+                    "system": bool(folder.get("system")),
                     "children": folder_nodes(fid),
                     "records": sort_records(by_folder.get(fid, [])),
                 }
@@ -334,8 +410,8 @@ def build_library_tree() -> dict[str, Any]:
 
     return {
         "folders": folder_nodes(None),
-        "uncategorized": sort_records(by_folder.get(None, [])),
-        "total_count": len(records),
+        "uncategorized": sort_records(uncategorized),
+        "total_count": len(uncategorized) + sum(len(v) for v in by_folder.values()),
     }
 
 

@@ -5,7 +5,13 @@ import json
 from typing import Any
 
 from app.services.bilibili import BilibiliError, fetch_subtitles, format_subtitle_text, parse_bilibili_ref
-from app.services.folder_store import create_folder, get_folder, list_folders
+from app.services.folder_store import (
+    create_folder,
+    get_folder,
+    is_system_folder,
+    is_uncategorized_folder_id,
+    list_user_folders,
+)
 from app.services.platform import detect_platform
 from app.services.subtitle_store import (
     delete_records,
@@ -49,8 +55,8 @@ def tool_label(name: str) -> str:
     return _TOOL_META.get(name, {}).get("label") or name
 
 
-def get_openai_tools() -> list[dict[str, Any]]:
-    """返回 OpenAI tools 数组（不含 category，分类见 catalog）。"""
+def get_openai_tools(*, intent: str | None = None) -> list[dict[str, Any]]:
+    """返回 OpenAI tools；write 分类仅暴露 folder 变更工具，避免误调 get_record。"""
     specs: list[tuple[str, str, dict[str, Any]]] = [
         (
             "list_records",
@@ -168,13 +174,21 @@ def get_openai_tools() -> list[dict[str, Any]]:
             },
         ),
     ]
-    return [
+    all_tools = [
         {
             "type": "function",
             "function": {"name": name, "description": desc, "parameters": params},
         }
         for name, desc, params in specs
     ]
+    if intent == "write":
+        # ponytail: 分类 mutate 预分析已含 record_id，勿再 list/get 正文
+        allowed = {"list_folders", "create_folder", "move_records"}
+        return [t for t in all_tools if t["function"]["name"] in allowed]
+    if intent == "query":
+        allowed = {"list_folders", "list_records", "get_record"}
+        return [t for t in all_tools if t["function"]["name"] in allowed]
+    return all_tools
 
 
 def execute(name: str, arguments: dict[str, Any]) -> str:
@@ -208,7 +222,7 @@ def _list_records(args: dict[str, Any]) -> str:
 
 
 def _get_record(args: dict[str, Any]) -> str:
-    rid = str(args.get("record_id") or "").strip()
+    rid = str(args.get("record_id") or args.get("id") or "").strip()
     if not rid:
         return json.dumps({"ok": False, "error": "缺少 record_id"}, ensure_ascii=False)
     rec = get_record(rid)
@@ -221,7 +235,7 @@ def _get_record(args: dict[str, Any]) -> str:
 
 
 def _list_folders(_args: dict[str, Any]) -> str:
-    folders = list_folders()
+    folders = list_user_folders()
     return json.dumps({"ok": True, "count": len(folders), "folders": folders}, ensure_ascii=False)
 
 
@@ -232,6 +246,8 @@ def _create_folder(args: dict[str, Any]) -> str:
     parent_id = args.get("parent_id")
     if parent_id is not None:
         parent_id = str(parent_id).strip() or None
+        if parent_id and is_system_folder(parent_id):
+            return json.dumps({"ok": False, "error": "不能在系统文件夹下创建子文件夹"}, ensure_ascii=False)
         if parent_id and not get_folder(parent_id):
             return json.dumps({"ok": False, "error": f"父文件夹不存在: {parent_id}"}, ensure_ascii=False)
     folder = create_folder(name, parent_id)
@@ -245,7 +261,9 @@ def _move_records(args: dict[str, Any]) -> str:
     folder_id = args.get("folder_id")
     if folder_id is not None and folder_id != "":
         folder_id = str(folder_id).strip()
-        if not get_folder(folder_id):
+        if is_uncategorized_folder_id(folder_id):
+            folder_id = None
+        elif not get_folder(folder_id):
             return json.dumps({"ok": False, "error": f"文件夹不存在: {folder_id}"}, ensure_ascii=False)
     else:
         folder_id = None

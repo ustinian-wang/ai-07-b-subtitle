@@ -123,6 +123,7 @@ class FolderPublic(BaseModel):
     id: str
     name: str
     parent_id: str | None = None
+    system: bool = False
     created_at: str = ""
     updated_at: str = ""
 
@@ -132,6 +133,7 @@ class LibraryTreeFolder(BaseModel):
     id: str
     name: str
     parent_id: str | None = None
+    system: bool = False
     children: list["LibraryTreeFolder"] = []
     records: list[SubtitleRecordSummary] = []
 
@@ -179,6 +181,7 @@ class ChatRequest(BaseModel):
     thread_id: str = ""
     message: str = Field(..., min_length=1)
     reference_record_ids: list[str] = Field(default_factory=list)
+    reference_folder_ids: list[str] = Field(default_factory=list)
 
 
 class ChatMessage(BaseModel):

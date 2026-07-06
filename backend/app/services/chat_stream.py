@@ -9,7 +9,14 @@ import httpx
 from openai import AsyncOpenAI
 
 from app.services import chat_store, chat_tools, settings_store
-from app.services.subtitle_store import get_record, infer_source
+from app.services.chat_classify_plan import (
+    apply_classify_plan,
+    build_classify_plan_block,
+    execution_summary,
+)
+from app.services.chat_intent import classify_turn, is_classify_mutate_turn, tool_choice_for_round
+from app.services.subtitle_store import get_record, infer_source, list_record_ids_in_folder
+from app.services.folder_store import get_folder, is_uncategorized_folder_id
 
 SYSTEM_PROMPT = """你是笔记分析助手。用户会引用本地库中的 B 站字幕或小红书笔记作为上下文。
 请优先基于引用笔记回答；若引用不足以回答，可结合常识并说明依据。
@@ -20,6 +27,8 @@ SYSTEM_PROMPT = """你是笔记分析助手。用户会引用本地库中的 B �
 
 # ponytail: 单条引用最多字符，避免撑爆上下文
 REF_CHAR_LIMIT = 12000
+# ponytail: 分类引用合计上限；超出则截断并标注
+FOLDER_REF_TOTAL_CHAR_LIMIT = 48000
 _MAX_TOOL_ROUNDS = 5
 
 _http_client: httpx.AsyncClient | None = None
@@ -55,6 +64,61 @@ def _llm_client() -> tuple[AsyncOpenAI, str]:
     )
 
 
+def _folder_display_name(folder_id: str) -> str:
+    if is_uncategorized_folder_id(folder_id):
+        return "未分类"
+    folder = get_folder(folder_id)
+    return (folder or {}).get("name") or folder_id
+
+
+def _build_folder_reference_block(folder_ids: list[str], *, summary_only: bool = False) -> str:
+    parts: list[str] = []
+    budget = FOLDER_REF_TOTAL_CHAR_LIMIT
+    for folder_id in folder_ids:
+        if budget <= 0:
+            parts.append("…（分类引用总字数已达上限，后续分类已省略）")
+            break
+        record_ids = list_record_ids_in_folder(folder_id)
+        if not record_ids:
+            continue
+        name = _folder_display_name(folder_id)
+        header = f"### [分类] {name} (#{folder_id}) · {len(record_ids)} 条笔记"
+        section_parts: list[str] = [header]
+        used = len(header)
+        truncated = False
+        for rid in record_ids:
+            rec = get_record(rid)
+            if not rec:
+                continue
+            source = infer_source(rec)
+            label = "小红书" if source == "xiaohongshu" else "B站"
+            title = rec.get("title") or rec.get("note_id") or rec.get("bvid") or rid
+            if summary_only:
+                piece = f"- [{label}] {title} (#{rid})"
+            else:
+                text = (rec.get("text") or "").strip()
+                piece = f"#### [{label}] {title} (#{rid})\n\n{text}"
+                if len(piece) > REF_CHAR_LIMIT:
+                    piece = piece[:REF_CHAR_LIMIT] + "\n…（已截断）"
+            if used + len(piece) + 2 > budget:
+                truncated = True
+                break
+            section_parts.append(piece)
+            used += len(piece) + 2
+        if truncated:
+            section_parts.append("…（该分类剩余笔记因字数上限未全部注入）")
+        parts.append("\n\n".join(section_parts))
+        budget -= used
+    if not parts:
+        return ""
+    intro = (
+        "以下为用户引用的本地库分类（仅标题与 id，正文请按需通过工具读取）："
+        if summary_only
+        else "以下为用户引用的本地库分类（含分类内笔记）："
+    )
+    return intro + "\n\n" + "\n\n---\n\n".join(parts)
+
+
 def _build_reference_block(record_ids: list[str]) -> str:
     parts: list[str] = []
     for rid in record_ids:
@@ -77,11 +141,23 @@ def build_messages(
     history: list[dict[str, str]],
     user_message: str,
     reference_record_ids: list[str],
+    reference_folder_ids: list[str] | None = None,
+    *,
+    intent: str = "read",
 ) -> list[dict[str, Any]]:
     ref_block = _build_reference_block(reference_record_ids)
+    folder_block = _build_folder_reference_block(
+        [x for x in (reference_folder_ids or []) if x],
+        summary_only=(intent == "write"),
+    )
     system = SYSTEM_PROMPT
-    if ref_block:
-        system = f"{SYSTEM_PROMPT}\n\n{ref_block}"
+    blocks = [b for b in (ref_block, folder_block) if b]
+    if intent == "write":
+        plan_block = build_classify_plan_block(reference_record_ids, reference_folder_ids or [])
+        if plan_block:
+            blocks.append(plan_block)
+    if blocks:
+        system = f"{SYSTEM_PROMPT}\n\n" + "\n\n".join(blocks)
 
     messages: list[dict[str, Any]] = [{"role": "system", "content": system}]
     for m in history:
@@ -122,6 +198,7 @@ async def sse_chat_stream(
     thread_id: str,
     message: str,
     reference_record_ids: list[str] | None = None,
+    reference_folder_ids: list[str] | None = None,
 ) -> AsyncIterator[str]:
     user_message = (message or "").strip()
     if not user_message:
@@ -129,19 +206,72 @@ async def sse_chat_stream(
         return
 
     ref_ids = [x for x in (reference_record_ids or []) if x]
+    folder_ids = [x for x in (reference_folder_ids or []) if x]
     try:
         history = chat_store.get_messages(thread_id)
-        messages = build_messages(history, user_message, ref_ids)
+        intent = classify_turn(
+            user_message,
+            history,
+            reference_folder_ids=folder_ids,
+            reference_record_ids=ref_ids,
+        )
+        messages = build_messages(history, user_message, ref_ids, folder_ids, intent=intent)
         client, model = _llm_client()
-        tools = chat_tools.get_openai_tools()
         full = ""
 
-        for _round in range(_MAX_TOOL_ROUNDS):
+        # ponytail: 自动分类由服务端按预分析执行，不让 LLM 并行调 get_record/create_folder
+        if is_classify_mutate_turn(
+            user_message,
+            history,
+            reference_folder_ids=folder_ids,
+            reference_record_ids=ref_ids,
+        ):
+            steps, plan = apply_classify_plan(ref_ids, folder_ids)
+            for step in steps:
+                name = step["name"]
+                yield f"data: {json.dumps({'tool_start': {'name': name, 'label': chat_tools.tool_label(name), 'category': chat_tools.tool_category(name), 'category_label': chat_tools.TOOL_CATEGORIES.get(chat_tools.tool_category(name), {}).get('label', '')}}, ensure_ascii=False)}\n\n"
+                yield f"data: {json.dumps({'tool_end': {'name': name, 'ok': step.get('ok', True), 'preview': step.get('preview', '')}}, ensure_ascii=False)}\n\n"
+
+            summary = execution_summary(steps, plan)
+            messages.append(
+                {
+                    "role": "user",
+                    "content": (
+                        f"系统已按预分析完成工具调用，结果 JSON：\n{summary}\n"
+                        f"跳过合集 {len(plan.get('skip_collection') or [])} 条，"
+                        f"未识别 {len(plan.get('skip_unknown') or [])} 条。"
+                        "请用 Markdown 简要汇报：新建了哪些文件夹、移动了多少条、哪些保留未分类。"
+                    ),
+                }
+            )
+            stream = await client.chat.completions.create(
+                model=model,
+                messages=messages,
+                stream=True,
+            )
+            async for event in stream:
+                choice = event.choices[0] if event.choices else None
+                if not choice:
+                    continue
+                piece = choice.delta.content or ""
+                if piece:
+                    full += piece
+                    yield f"data: {json.dumps({'delta': piece}, ensure_ascii=False)}\n\n"
+            if not full.strip():
+                full = f"已完成自动分类：{summary}"
+                yield f"data: {json.dumps({'delta': full}, ensure_ascii=False)}\n\n"
+            chat_store.append_exchange(thread_id, user_message, full)
+            yield f"data: {json.dumps({'done': True}, ensure_ascii=False)}\n\n"
+            return
+
+        tools = chat_tools.get_openai_tools(intent=intent)
+
+        for round_idx in range(_MAX_TOOL_ROUNDS):
             response = await client.chat.completions.create(
                 model=model,
                 messages=messages,
                 tools=tools,
-                tool_choice="auto",
+                tool_choice=tool_choice_for_round(intent, round_idx),
                 stream=False,
             )
             msg = response.choices[0].message
@@ -149,6 +279,27 @@ async def sse_chat_stream(
             if not msg.tool_calls:
                 if msg.content:
                     full = msg.content
+                # ponytail: write 首轮未调工具则补编排 user 消息，促发 create/move
+                if intent == "write" and round_idx == 0:
+                    messages.append(
+                        {
+                            "role": "assistant",
+                            "content": full or "（未调用工具。）",
+                        }
+                    )
+                    messages.append(
+                        {
+                            "role": "user",
+                            "content": (
+                                "请按预分析清单调用工具完成笔记库变更："
+                                "先 list_folders，再 create_folder 补缺失文件夹，"
+                                "最后用 move_records 移动可单城笔记；合集笔记跳过。"
+                                "完成后简要汇报移动条数。"
+                            ),
+                        }
+                    )
+                    full = ""
+                    continue
                 break
 
             messages.append(msg.model_dump(exclude_none=True))

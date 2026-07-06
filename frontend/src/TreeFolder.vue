@@ -84,6 +84,7 @@
 
 <script>
 import TreeRecord from './TreeRecord.vue';
+import { DRAG_FOLDER_MIME } from './dragMime.js';
 
 export default {
   name: 'TreeFolder',
@@ -144,16 +145,22 @@ export default {
         event.preventDefault();
         return;
       }
-      const ids = this.collectRecordIds(this.folder);
-      if (!ids.length) {
+      const recordIds = this.collectRecordIds(this.folder);
+      if (!recordIds.length) {
         event.preventDefault();
         this.$emit('folder-ref-drag-empty');
         return;
       }
+      const payload = {
+        folder_id: this.folder.id,
+        name: this.folder.name,
+        record_ids: recordIds,
+        record_count: recordIds.length,
+      };
       event.dataTransfer.effectAllowed = 'copy';
-      event.dataTransfer.setData('application/x-subtitle-ids', JSON.stringify(ids));
-      event.dataTransfer.setData('text/plain', `${this.folder.name} · ${ids.length} 条笔记`);
-      this.$emit('record-drag-start', { ids, purpose: 'ref' });
+      event.dataTransfer.setData(DRAG_FOLDER_MIME, JSON.stringify(payload));
+      event.dataTransfer.setData('text/plain', `${this.folder.name} · ${recordIds.length} 条笔记`);
+      this.$emit('record-drag-start', { purpose: 'folder-ref' });
     },
     onDragEnd() {
       this.$emit('record-drag-end');

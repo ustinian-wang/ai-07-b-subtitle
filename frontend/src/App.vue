@@ -555,7 +555,7 @@ export default {
       document.removeEventListener('mouseup', this.onMarqueeEnd);
       this._marqueePane = null;
     },
-    onRecordDragStart({ ids, purpose = 'move' }) {
+    onRecordDragStart({ ids = [], purpose = 'move' }) {
       this.draggingRecordIds = ids;
       this.dragPurpose = purpose;
     },
@@ -588,7 +588,7 @@ export default {
       }
     },
     async onFolderDrop(folderId) {
-      if (this.dragPurpose === 'ref') return;
+      if (this.dragPurpose === 'ref' || this.dragPurpose === 'folder-ref') return;
       const ids = this.draggingRecordIds.length ? this.draggingRecordIds : [...this.selectedIds];
       const targetId = folderId === '__uncategorized__' ? null : folderId;
       await this.moveRecordsToFolder(ids, targetId);

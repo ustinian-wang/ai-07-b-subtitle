@@ -53,6 +53,7 @@
 </template>
 
 <script>
+import { DRAG_RECORD_MIME } from './dragMime.js';
 export default {
   name: 'TreeRecord',
   props: {
@@ -79,7 +80,7 @@ export default {
       const ids = this.dragIds();
       // ponytail: copyMove 同时支持侧栏移动与对话区 @ 引用；侧栏靠 purpose=move 区分
       event.dataTransfer.effectAllowed = 'copyMove';
-      event.dataTransfer.setData('application/x-subtitle-ids', JSON.stringify(ids));
+      event.dataTransfer.setData(DRAG_RECORD_MIME, JSON.stringify(ids));
       event.dataTransfer.setData('text/plain', `${ids.length} 条笔记`);
       this.$emit('drag-start', { ids, purpose: 'move' });
     },
