@@ -1,0 +1,42 @@
+backend/app/services/chat_stream.py
+  s_736c93b51a67e7::t_8f87c2947e8e2b 163
+  s_736c93b51a67e7::t_7fad2c40b13f6b 1,6,11,16-19,23,80,86,93-120,136,138-162,164-196,199-201
+  s_736c93b51a67e7::t_0bbe4248cc757d 202
+frontend/src/SettingsPage.vue
+  s_736c93b51a67e7::t_e71d69fe03452a 146-147,152
+  s_736c93b51a67e7::t_6ec4c7c7e3a383 190-203
+  s_736c93b51a67e7::t_7a426a626ca943 362-402
+  s_736c93b51a67e7::t_c0c44726c40adf 104-122
+backend/app/services/chat_tools_catalog.py
+  s_736c93b51a67e7::t_586f22f9b5cf4b 1-75
+frontend/src/ChatPanel.vue
+  s_736c93b51a67e7::t_70897f6fd6a772 614
+  s_736c93b51a67e7::t_53df10c98e3595 657-661,663-678
+  s_736c93b51a67e7::t_e9612a5d297f6d 236
+  s_736c93b51a67e7::t_fba87eef147bbe 662
+  s_736c93b51a67e7::t_bb25e45fd3eb7b 89-100
+  s_736c93b51a67e7::t_394c9bfb5529f7 870-898
+  s_736c93b51a67e7::t_6c6f3b202c051a 700
+  s_736c93b51a67e7::t_afa879352ab58f 686
+backend/app/api/v1/chat.py
+  s_736c93b51a67e7::t_df4d05bfbc48e6 18,23-26
+  s_736c93b51a67e7::t_9f3755b1d60af1 27-28
+backend/app/services/chat_tools.py
+  s_736c93b51a67e7::t_9c3595edf21565 1-399
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "fe0deeec96d0714f7af61294de27de9c7fc6bee3",
+  "prompts": {},
+  "sessions": {
+    "s_736c93b51a67e7": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "d38e583a-0c3d-4908-afcb-77ee91a8bf78",
+        "model": "default"
+      },
+      "human_author": "jser <87244899@qq.com>"
+    }
+  }
+}
