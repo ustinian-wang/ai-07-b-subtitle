@@ -55,6 +55,56 @@ def tool_label(name: str) -> str:
     return _TOOL_META.get(name, {}).get("label") or name
 
 
+def _record_id(args: dict[str, Any]) -> str:
+    """笔记 id，与存储字段 record.id / list_records.id 一致。"""
+    return str(args.get("id") or args.get("record_id") or "").strip()
+
+
+def _record_ids(args: dict[str, Any]) -> list[str]:
+    """笔记 id 列表，兼容旧参数 record_ids。"""
+    raw: Any = args.get("ids")
+    if raw is None:
+        raw = args.get("record_ids")
+    if raw is None and args.get("id"):
+        raw = [args.get("id")]
+    if isinstance(raw, str):
+        raw = [raw]
+    if not isinstance(raw, list):
+        return []
+    return [str(x).strip() for x in raw if str(x).strip()]
+
+
+def _folder_id_by_name(name: str) -> str | None:
+    key = (name or "").strip().lower()
+    if not key:
+        return None
+    for folder in list_user_folders():
+        if (folder.get("name") or "").strip().lower() == key:
+            return folder.get("id")
+    return None
+
+
+def _resolve_folder_target(args: dict[str, Any]) -> tuple[str | None, str | None]:
+    """
+    解析目标文件夹，与 folder 存储字段对齐。
+    返回 (folder_id | None 表示未分类, error)。
+    """
+    if args.get("folder_name"):
+        fid = _folder_id_by_name(str(args["folder_name"]))
+        if not fid:
+            return None, f"文件夹不存在: {args['folder_name']}"
+        return fid, None
+    folder_id = args.get("folder_id")
+    if folder_id is None or folder_id == "":
+        return None, None
+    fid = str(folder_id).strip()
+    if is_uncategorized_folder_id(fid):
+        return None, None
+    if get_folder(fid):
+        return fid, None
+    return None, f"文件夹不存在: {fid}"
+
+
 def get_openai_tools(*, intent: str | None = None) -> list[dict[str, Any]]:
     """返回 OpenAI tools；write 分类仅暴露 folder 变更工具，避免误调 get_record。"""
     specs: list[tuple[str, str, dict[str, Any]]] = [
@@ -77,13 +127,13 @@ def get_openai_tools(*, intent: str | None = None) -> list[dict[str, Any]]:
         ),
         (
             "get_record",
-            "读取单条笔记详情（含正文 text）。",
+            "读取单条笔记详情（含正文 text）。参数 id 同 list_records 返回的 id。",
             {
                 "type": "object",
                 "properties": {
-                    "record_id": {"type": "string", "description": "笔记 id"},
+                    "id": {"type": "string", "description": "笔记 id（同 records[].id）"},
                 },
-                "required": ["record_id"],
+                "required": ["id"],
                 "additionalProperties": False,
             },
         ),
@@ -107,21 +157,25 @@ def get_openai_tools(*, intent: str | None = None) -> list[dict[str, Any]]:
         ),
         (
             "move_records",
-            "批量移动笔记到目标文件夹；folder_id 为 null 表示未分类。",
+            "批量移动笔记；folder_id 同 folders[].id，folder_name 同 folders[].name；二者皆空表示未分类。",
             {
                 "type": "object",
                 "properties": {
-                    "record_ids": {
+                    "ids": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "笔记 id 列表",
+                        "description": "笔记 id 列表（同 records[].id）",
                     },
                     "folder_id": {
                         "type": ["string", "null"],
-                        "description": "目标文件夹 id，null=未分类",
+                        "description": "目标文件夹 id（同 folders[].id），null=未分类",
+                    },
+                    "folder_name": {
+                        "type": "string",
+                        "description": "目标文件夹名称（同 folders[].name），与 folder_id 二选一",
                     },
                 },
-                "required": ["record_ids"],
+                "required": ["ids"],
                 "additionalProperties": False,
             },
         ),
@@ -134,7 +188,8 @@ def get_openai_tools(*, intent: str | None = None) -> list[dict[str, Any]]:
                     "url": {"type": "string", "description": "视频/笔记链接"},
                     "page": {"type": "integer", "description": "B 站分 P，默认 1", "minimum": 1},
                     "force": {"type": "boolean", "description": "true 时忽略去重重拉"},
-                    "folder_id": {"type": "string", "description": "保存到指定文件夹"},
+                    "folder_id": {"type": "string", "description": "保存到文件夹 id（同 folders[].id）"},
+                    "folder_name": {"type": "string", "description": "保存到文件夹名称（同 folders[].name）"},
                 },
                 "required": ["url"],
                 "additionalProperties": False,
@@ -146,13 +201,13 @@ def get_openai_tools(*, intent: str | None = None) -> list[dict[str, Any]]:
             {
                 "type": "object",
                 "properties": {
-                    "record_ids": {
+                    "ids": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "要删除的笔记 id",
+                        "description": "笔记 id 列表（同 records[].id）",
                     },
                 },
-                "required": ["record_ids"],
+                "required": ["ids"],
                 "additionalProperties": False,
             },
         ),
@@ -162,14 +217,14 @@ def get_openai_tools(*, intent: str | None = None) -> list[dict[str, Any]]:
             {
                 "type": "object",
                 "properties": {
-                    "record_ids": {
+                    "ids": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "笔记 id 列表",
+                        "description": "笔记 id 列表（同 records[].id）",
                     },
                     "format": {"type": "string", "enum": ["txt", "json"], "description": "导出格式"},
                 },
-                "required": ["record_ids"],
+                "required": ["ids"],
                 "additionalProperties": False,
             },
         ),
@@ -182,7 +237,7 @@ def get_openai_tools(*, intent: str | None = None) -> list[dict[str, Any]]:
         for name, desc, params in specs
     ]
     if intent == "write":
-        # ponytail: 分类 mutate 预分析已含 record_id，勿再 list/get 正文
+        # ponytail: 分类 mutate 预分析已含 id/folder_id，勿再 list/get 正文
         allowed = {"list_folders", "create_folder", "move_records"}
         return [t for t in all_tools if t["function"]["name"] in allowed]
     if intent == "query":
@@ -222,9 +277,9 @@ def _list_records(args: dict[str, Any]) -> str:
 
 
 def _get_record(args: dict[str, Any]) -> str:
-    rid = str(args.get("record_id") or args.get("id") or "").strip()
+    rid = _record_id(args)
     if not rid:
-        return json.dumps({"ok": False, "error": "缺少 record_id"}, ensure_ascii=False)
+        return json.dumps({"ok": False, "error": "缺少 id"}, ensure_ascii=False)
     rec = get_record(rid)
     if not rec:
         return json.dumps({"ok": False, "error": f"笔记不存在: {rid}"}, ensure_ascii=False)
@@ -255,18 +310,12 @@ def _create_folder(args: dict[str, Any]) -> str:
 
 
 def _move_records(args: dict[str, Any]) -> str:
-    ids = [str(x).strip() for x in (args.get("record_ids") or []) if str(x).strip()]
+    ids = _record_ids(args)
     if not ids:
-        return json.dumps({"ok": False, "error": "record_ids 不能为空"}, ensure_ascii=False)
-    folder_id = args.get("folder_id")
-    if folder_id is not None and folder_id != "":
-        folder_id = str(folder_id).strip()
-        if is_uncategorized_folder_id(folder_id):
-            folder_id = None
-        elif not get_folder(folder_id):
-            return json.dumps({"ok": False, "error": f"文件夹不存在: {folder_id}"}, ensure_ascii=False)
-    else:
-        folder_id = None
+        return json.dumps({"ok": False, "error": "ids 不能为空"}, ensure_ascii=False)
+    folder_id, err = _resolve_folder_target(args)
+    if err:
+        return json.dumps({"ok": False, "error": err}, ensure_ascii=False)
     result = move_records_to_folder(ids, folder_id)
     return json.dumps({"ok": True, **result}, ensure_ascii=False)
 
@@ -306,11 +355,9 @@ def _extract_note(args: dict[str, Any]) -> str:
         return json.dumps({"ok": False, "error": "缺少 url"}, ensure_ascii=False)
     page = max(int(args.get("page") or 1), 1)
     force = bool(args.get("force"))
-    folder_id = args.get("folder_id")
-    if folder_id is not None:
-        folder_id = str(folder_id).strip() or None
-        if folder_id and not get_folder(folder_id):
-            return json.dumps({"ok": False, "error": f"文件夹不存在: {folder_id}"}, ensure_ascii=False)
+    folder_id, err = _resolve_folder_target(args)
+    if err:
+        return json.dumps({"ok": False, "error": err}, ensure_ascii=False)
 
     try:
         platform = detect_platform(url)
@@ -328,7 +375,7 @@ def _extract_note(args: dict[str, Any]) -> str:
                 {
                     "ok": True,
                     "duplicate": True,
-                    "record_id": existing.get("id"),
+                    "id": existing.get("id"),
                     "title": existing.get("title"),
                     "source": infer_source(existing),
                 },
@@ -380,7 +427,7 @@ def _extract_note(args: dict[str, Any]) -> str:
         {
             "ok": True,
             "duplicate": False,
-            "record_id": saved.get("id"),
+            "id": saved.get("id"),
             "title": saved.get("title"),
             "source": infer_source(saved),
         },
@@ -389,17 +436,17 @@ def _extract_note(args: dict[str, Any]) -> str:
 
 
 def _delete_records(args: dict[str, Any]) -> str:
-    ids = [str(x).strip() for x in (args.get("record_ids") or []) if str(x).strip()]
+    ids = _record_ids(args)
     if not ids:
-        return json.dumps({"ok": False, "error": "record_ids 不能为空"}, ensure_ascii=False)
+        return json.dumps({"ok": False, "error": "ids 不能为空"}, ensure_ascii=False)
     result = delete_records(ids)
     return json.dumps({"ok": True, **result}, ensure_ascii=False)
 
 
 def _export_records(args: dict[str, Any]) -> str:
-    ids = [str(x).strip() for x in (args.get("record_ids") or []) if str(x).strip()]
+    ids = _record_ids(args)
     if not ids:
-        return json.dumps({"ok": False, "error": "record_ids 不能为空"}, ensure_ascii=False)
+        return json.dumps({"ok": False, "error": "ids 不能为空"}, ensure_ascii=False)
     fmt = str(args.get("format") or "txt").strip().lower()
     if fmt not in ("txt", "json"):
         fmt = "txt"
@@ -414,4 +461,7 @@ if __name__ == "__main__":
     assert tool_category("list_records") == "library"
     assert tool_label("extract_note") == "从链接提取笔记"
     assert len(get_openai_tools()) == len(_TOOL_META)
+    assert _record_ids({"ids": ["a"]}) == ["a"]
+    assert _record_ids({"record_ids": ["b"]}) == ["b"]
+    assert _record_id({"id": "c"}) == "c"
     print("chat_tools self-check ok")

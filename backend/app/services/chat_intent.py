@@ -1,238 +1,129 @@
-"""对话轮次意图：read / query / write，驱动 tool_choice 编排（非 system prompt 堆砌）。"""
+"""对话轮次意图：由 LLM 结构化判断，驱动后续编排。"""
 from __future__ import annotations
 
-import re
+import json
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
 
-# 只读：分析、总结、对比
-_READ_ONLY = re.compile(
-    r"(分析|总结|概括|对比|解释|什么意思|是什么|怎么样|评价|优缺点|推荐吗|值得吗|帮我看|看看这)",
-    re.I,
-)
+if TYPE_CHECKING:
+    from openai import AsyncOpenAI
 
-# 库查询：列目录、搜笔记，不改数据
-_QUERY = re.compile(
-    r"(有哪些|有什么|列出|列一下|查看|查询|搜索|找一下|显示|目录|文件夹列表|分类列表|"
-    r"list\s*folder|show\s*folder|树形|结构)",
-    re.I,
-)
+_INTENT_SYSTEM = """你是笔记库对话的意图路由器。只输出 JSON，不要其它文字。
 
-# 写库：分类、移动、新建、删除、导入
-_WRITE = re.compile(
-    r"(自动分类|按城市|按地区|重新分类|重新分配|调整.*分类|对笔记.*分类|归类到|归类|"
-    r"移动到|移到|创建文件夹|新建文件夹|新建分类|"
-    r"删除|移除|导入|抓取|下载|整理笔记|帮我分|帮我移|执行分类|开始分|开始整理|落库|"
-    r"create_folder|move_record|delete_record|fetch)",
-    re.I,
-)
+字段：
+- mode: "read" | "query" | "write" | "classify"
+  - read: 分析/问答/解释，不改库
+  - query: 列出文件夹、搜索笔记、查看目录
+  - write: 单条或少量笔记的移动/删除/导入/导出
+  - classify: 批量按城市/规则重新分类、整理未分类
+- execute_tools: bool — 本轮是否应调用工具写库（create_folder / move_records 等）
+  - 用户只要方案、讨论怎么分 → false
+  - 用户明确要求执行、搬过去、调用工具、自动分类落库 → true
+  - 结合上文：助手刚给出分类方案，用户 ok/继续/搞下/按此执行 → true
+- inject_classify_plan: bool — 是否注入批量分类预分析（classify 或批量整理时为 true）
 
-_CONFIRM = re.compile(r"^(好|好的|可以|行|确认|开始|执行|按这个|就这样|ok|yes|go)\.?$", re.I)
-_CLASSIFY_CONTINUE = re.compile(r"^(继续|搞下|执行吧|按此执行|按此|落库)\.?$", re.I)
+注意：
+- 「重新分类」多为 classify + execute_tools=false（先出方案）
+- 「自动分类」「移动到文件夹」「一定要执行」多为 execute_tools=true
+- 无实质写库需求时不要 execute_tools=true
+"""
 
-_CLASSIFY_SCOPE = re.compile(
-    r"(自动分类|按城市|按地区|归类|整理|帮我分|开始分|重新分类|重新分配|分类|落库)",
-    re.I,
-)
-
-_ASSISTANT_CLASSIFY = re.compile(
-    r"(分类|文件夹|移动|create_folder|move_records|落库|归类|未分类)",
-    re.I,
-)
-
-# 明确要写库执行（非仅出方案）
-_EXECUTE_CLASSIFY = re.compile(
-    r"(自动分类|执行分类|开始整理|开始分|落库|帮我移|按此执行|按此)",
-    re.I,
-)
-
-# 仅要方案、暂不写库
-_PLAN_ONLY_CLASSIFY = re.compile(
-    r"(重新分类|重新分配|调整.*分类|怎么分|如何分|建议.*分类)",
-    re.I,
-)
-
-# 走服务端自动分类（非「移动到某文件夹」等单条操作）
-_CLASSIFY_ACTION = re.compile(
-    r"(自动分类|按城市|按地区|重新分类|重新分配|调整.*分类|对笔记.*分类|"
-    r"归类|整理笔记|帮我分|执行分类|开始分|开始整理)",
-    re.I,
-)
+_VALID_MODES = frozenset({"read", "query", "write", "classify"})
 
 
-def _last_assistant_text(history: list[dict[str, str]]) -> str:
-    for m in reversed(history):
-        if m.get("role") == "assistant":
-            return m.get("content") or ""
-    return ""
+@dataclass
+class TurnIntent:
+    mode: str = "read"
+    execute_tools: bool = False
+    inject_classify_plan: bool = False
 
-
-def classify_turn(
-    user_message: str,
-    history: list[dict[str, str]],
-    *,
-    reference_folder_ids: list[str] | None = None,
-    reference_record_ids: list[str] | None = None,
-) -> str:
-    """
-    返回 read | query | write。
-    - query：列文件夹/搜笔记，首轮强制 list_folders
-    - write：改库；引用分类/分类关键词 → 预分析 + 工具链
-    """
-    t = (user_message or "").strip()
-    if not t:
-        return "read"
-
-    has_refs = bool(reference_folder_ids or reference_record_ids)
-    last_assistant = _last_assistant_text(history)
-
-    if (_CONFIRM.match(t) or _CLASSIFY_CONTINUE.match(t)) and history:
-        if _WRITE.search(last_assistant) or _ASSISTANT_CLASSIFY.search(last_assistant):
+    @property
+    def tool_intent(self) -> str:
+        """供 get_openai_tools 使用：classify 按 write 收窄工具集。"""
+        if self.mode in ("write", "classify"):
             return "write"
+        return self.mode
 
-    if history and _ASSISTANT_CLASSIFY.search(last_assistant):
-        if re.search(r"(搞下|按此|落库|执行)", t, re.I):
-            return "write"
-
-    if _QUERY.search(t) and not _WRITE.search(t):
-        return "query"
-
-    if _WRITE.search(t):
-        return "write"
-
-    if has_refs and _CLASSIFY_SCOPE.search(t) and not _READ_ONLY.search(t):
-        return "write"
-
-    if has_refs and _READ_ONLY.search(t):
-        return "read"
-
-    return "read"
+    @property
+    def is_classify(self) -> bool:
+        return self.mode == "classify" or self.inject_classify_plan
 
 
-def is_classify_action(
+def _history_tail(history: list[dict[str, str]], n: int = 4) -> str:
+    tail = history[-n:] if history else []
+    lines: list[str] = []
+    for m in tail:
+        role = m.get("role") or "user"
+        text = (m.get("content") or "").strip().replace("\n", " ")[:400]
+        if text:
+            lines.append(f"{role}: {text}")
+    return "\n".join(lines) if lines else "（无历史）"
+
+
+def parse_intent_payload(raw: str) -> TurnIntent:
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return TurnIntent()
+    if not isinstance(data, dict):
+        return TurnIntent()
+    mode = str(data.get("mode") or "read").strip().lower()
+    if mode not in _VALID_MODES:
+        mode = "read"
+    execute = bool(data.get("execute_tools"))
+    inject = bool(data.get("inject_classify_plan"))
+    if mode == "classify":
+        inject = True
+    return TurnIntent(mode=mode, execute_tools=execute, inject_classify_plan=inject)
+
+
+async def infer_turn_intent(
+    client: "AsyncOpenAI",
+    model: str,
     user_message: str,
     history: list[dict[str, str]],
     *,
-    reference_folder_ids: list[str] | None = None,
     reference_record_ids: list[str] | None = None,
-) -> bool:
-    """是否为批量分类/重新分类（非单条移动、删除等）。"""
-    from app.services.chat_classify_plan import collect_refs_from_history
-
-    t = (user_message or "").strip()
-    hist_refs, _ = collect_refs_from_history(history, reference_record_ids, reference_folder_ids)
-    has_refs = bool(hist_refs or reference_folder_ids or reference_record_ids)
-    last_assistant = _last_assistant_text(history)
-
-    if _CLASSIFY_ACTION.search(t):
-        return True
-    if has_refs and _CLASSIFY_SCOPE.search(t) and not _READ_ONLY.search(t):
-        return True
-    if history and (_CLASSIFY_CONTINUE.match(t) or re.search(r"(搞下|按此|落库|执行)", t, re.I)):
-        if _ASSISTANT_CLASSIFY.search(last_assistant):
-            return True
-    return False
-
-
-def should_execute_classify_tools(
-    plan: dict,
-    user_message: str,
-    history: list[dict[str, str]],
-) -> bool:
-    """
-    判断是否真的要调工具写库。
-    - 无实质变更（已在目标文件夹）→ 否
-    - 「重新分类」等仅要方案 → 否
-    - 「自动分类」/确认执行 → 是
-    """
-    from app.services.chat_classify_plan import plan_actionable_work
-
-    actionable = plan_actionable_work(plan)
-    if not actionable["has_work"]:
-        return False
-
-    t = (user_message or "").strip()
-    last_assistant = _last_assistant_text(history)
-
-    if _EXECUTE_CLASSIFY.search(t):
-        return True
-    if _CLASSIFY_CONTINUE.match(t):
-        return True
-    if _CONFIRM.match(t) and history and _ASSISTANT_CLASSIFY.search(last_assistant):
-        return True
-    if history and _ASSISTANT_CLASSIFY.search(last_assistant):
-        if re.search(r"(搞下|按此|落库|执行)", t, re.I):
-            return True
-
-    if _PLAN_ONLY_CLASSIFY.search(t) and not _EXECUTE_CLASSIFY.search(t):
-        return False
-
-    return False
-
-
-def is_classify_mutate_turn(
-    user_message: str,
-    history: list[dict[str, str]],
-    *,
     reference_folder_ids: list[str] | None = None,
-    reference_record_ids: list[str] | None = None,
-) -> bool:
-    """是否进入分类编排分支（注入预分析；是否写库见 should_execute_classify_tools）。"""
-    if classify_turn(
-        user_message,
-        history,
-        reference_folder_ids=reference_folder_ids,
-        reference_record_ids=reference_record_ids,
-    ) != "write":
-        return False
-    return is_classify_action(
-        user_message,
-        history,
-        reference_folder_ids=reference_folder_ids,
-        reference_record_ids=reference_record_ids,
+    classify_hint: str | None = None,
+) -> TurnIntent:
+    """LLM 判断本轮意图（单次短调用）。"""
+    ref_n = len([x for x in (reference_record_ids or []) if x])
+    folder_n = len([x for x in (reference_folder_ids or []) if x])
+    user_block = (
+        f"用户最新消息：{user_message}\n\n"
+        f"当前引用：笔记 {ref_n} 条，文件夹 {folder_n} 个\n"
+        f"最近对话：\n{_history_tail(history)}\n"
     )
+    if classify_hint:
+        user_block += f"\n分类预分析摘要：{classify_hint}\n"
+
+    response = await client.chat.completions.create(
+        model=model,
+        messages=[
+            {"role": "system", "content": _INTENT_SYSTEM},
+            {"role": "user", "content": user_block},
+        ],
+        response_format={"type": "json_object"},
+        temperature=0,
+        stream=False,
+    )
+    content = (response.choices[0].message.content or "").strip()
+    return parse_intent_payload(content)
 
 
 def tool_choice_for_round(intent: str, round_idx: int) -> str | dict[str, object]:
-    """write/query 首轮指定 list_folders；write 后续 auto（工具集已收窄）。"""
-    if round_idx == 0:
-        if intent in ("write", "query"):
-            return {"type": "function", "function": {"name": "list_folders"}}
-        return "auto"
+    if round_idx == 0 and intent in ("write", "query"):
+        return {"type": "function", "function": {"name": "list_folders"}}
     return "auto"
 
 
 def _self_check() -> None:
-    assert classify_turn("帮我总结引用笔记", []) == "read"
-    assert classify_turn("有哪些分类", []) == "query"
-    assert classify_turn("帮我把笔记按城市自动分类", [], reference_folder_ids=["__uncategorized__"]) == "write"
-    assert classify_turn("帮我把这些笔记重新分类", [], reference_folder_ids=["__uncategorized__"]) == "write"
-    assert classify_turn("根据笔记的内容，对笔记重新分类", [], reference_folder_ids=["__uncategorized__"]) == "write"
-    assert (
-        classify_turn(
-            "继续",
-            [{"role": "assistant", "content": "移动清单如下，可按文件夹批量归类"}],
-            reference_folder_ids=["__uncategorized__"],
-        )
-        == "write"
-    )
-    assert (
-        classify_turn(
-            "行，你帮我搞下",
-            [{"role": "assistant", "content": "我可以帮你新建分类文件夹并移动笔记"}],
-            reference_folder_ids=["__uncategorized__"],
-        )
-        == "write"
-    )
-    assert is_classify_mutate_turn(
-        "帮我把笔记按城市自动分类", [], reference_folder_ids=["__uncategorized__"]
-    )
-    assert is_classify_mutate_turn("重新分类", [])
-    assert not is_classify_mutate_turn("移动到首尔文件夹", [])
-    from app.services.chat_classify_plan import build_classify_plan, plan_actionable_work
-
-    plan = build_classify_plan([], ["__uncategorized__"])
-    assert not should_execute_classify_tools(plan, "重新分类", [])
-    assert should_execute_classify_tools(plan, "帮我把笔记按城市自动分类", []) or not plan_actionable_work(plan)["has_work"]
-    assert tool_choice_for_round("write", 0) == {"type": "function", "function": {"name": "list_folders"}}
+    t = parse_intent_payload('{"mode":"classify","execute_tools":false,"inject_classify_plan":true}')
+    assert t.mode == "classify" and not t.execute_tools and t.is_classify
+    t2 = parse_intent_payload('{"mode":"write","execute_tools":true}')
+    assert t2.execute_tools and t2.tool_intent == "write"
+    assert parse_intent_payload("not json").mode == "read"
 
 
 if __name__ == "__main__":

@@ -78,17 +78,17 @@ def _is_collection_note(title: str, cities: list[str]) -> bool:
     return False
 
 
-def analyze_record(record_id: str) -> dict[str, Any] | None:
-    rec = get_record(record_id)
+def analyze_record(note_id: str) -> dict[str, Any] | None:
+    rec = get_record(note_id)
     if not rec:
         return None
     title = _title_of(rec)
     cities = cities_in_title(title)
-    base = {"record_id": record_id, "title": title, "cities": cities}
+    base = {"id": note_id, "title": title, "cities": cities}
     if _is_collection_note(title, cities):
         return {**base, "action": "skip_collection", "reason": "多城/合集/待定，勿单城移动"}
     if len(cities) == 1:
-        return {**base, "action": "move", "suggested_folder_name": cities[0]}
+        return {**base, "action": "move", "folder_name": cities[0]}
     return {**base, "action": "skip_unknown", "reason": "标题未识别出单一城市"}
 
 
@@ -176,12 +176,12 @@ def plan_actionable_work(plan: dict[str, Any]) -> dict[str, Any]:
             folders_to_create.append(fname)
 
     for item in plan.get("movable") or []:
-        fname = item["suggested_folder_name"]
-        fid = item.get("existing_folder_id") or name_to_id.get(fname.lower())
+        fname = item["folder_name"]
+        fid = item.get("folder_id") or name_to_id.get(fname.lower())
         if not fid:
             pending_moves.append(item)
             continue
-        rec = get_record(item["record_id"])
+        rec = get_record(item["id"])
         if not rec:
             continue
         current = normalize_folder_id(rec.get("folder_id"), valid)
@@ -193,6 +193,23 @@ def plan_actionable_work(plan: dict[str, Any]) -> dict[str, Any]:
         "pending_moves": pending_moves,
         "folders_to_create": folders_to_create,
     }
+
+
+def classify_plan_hint(
+    reference_record_ids: list[str] | None = None,
+    reference_folder_ids: list[str] | None = None,
+    history: list[dict[str, str]] | None = None,
+) -> str:
+    """供意图 LLM 参考的一行摘要。"""
+    plan = build_classify_plan(reference_record_ids, reference_folder_ids, history)
+    actionable = plan_actionable_work(plan)
+    return (
+        f"扫描{plan['total_scanned']}条; "
+        f"可移动{len(actionable['pending_moves'])}; "
+        f"需新建文件夹{len(actionable['folders_to_create'])}; "
+        f"跳过合集{len(plan.get('skip_collection') or [])}; "
+        f"未识别{len(plan.get('skip_unknown') or [])}"
+    )
 
 
 def build_classify_plan(
@@ -214,23 +231,23 @@ def build_classify_plan(
             continue
         action = row.get("action")
         if action == "move":
-            fname = row["suggested_folder_name"]
+            fname = row["folder_name"]
             existing_id = name_to_id.get(fname.lower())
             entry = {
-                "record_id": row["record_id"],
+                "id": row["id"],
                 "title": row["title"],
-                "suggested_folder_name": fname,
-                "existing_folder_id": existing_id,
+                "folder_name": fname,
+                "folder_id": existing_id,
             }
             movable.append(entry)
             if not existing_id:
                 folders_to_create.add(fname)
         elif action == "skip_collection":
             skip_collection.append(
-                {"record_id": row["record_id"], "title": row["title"], "cities": row.get("cities") or []}
+                {"id": row["id"], "title": row["title"], "cities": row.get("cities") or []}
             )
         else:
-            skip_unknown.append({"record_id": row["record_id"], "title": row["title"]})
+            skip_unknown.append({"id": row["id"], "title": row["title"]})
 
     return {
         "total_scanned": len(record_ids),
@@ -266,9 +283,10 @@ def build_classify_plan_block(
         lines.append(f"- 已有用户文件夹：{names}")
 
     lines.append("")
-    lines.append("执行顺序：1) list_folders 核对 2) create_folder 补缺失 3) move_records 逐批移动。")
+    lines.append("执行顺序：1) list_folders 核对 2) create_folder(name) 补缺失 3) move_records(ids, folder_id|folder_name)。")
+    lines.append("字段与存储一致：笔记用 id，文件夹用 folder_id / folder_name（同 list_folders）。")
     lines.append("若用户仅要方案（如「重新分类」），只输出建议、勿写库；确认执行后再调用工具。")
-    lines.append("禁止调用 list_records / get_record；record_id 与目标文件夹已在下方清单。")
+    lines.append("禁止调用 list_records / get_record；清单已含 id 与目标文件夹。")
     lines.append("合集/多城笔记不要 move；可保留未分类或询问用户是否建「合集」文件夹。")
     lines.append("")
     lines.append("可移动清单（JSON）：")
@@ -280,7 +298,7 @@ def build_classify_plan_block(
         lines.append("跳过（合集/多城）：")
         for x in plan["skip_collection"]:
             cities = "、".join(x.get("cities") or []) or "—"
-            lines.append(f"- {x['title']} (#{x['record_id']}) [{cities}]")
+            lines.append(f"- {x['title']} (#{x['id']}) [{cities}]")
     return "\n".join(lines)
 
 
@@ -343,10 +361,10 @@ def apply_classify_plan(
 
     groups: dict[str, list[str]] = defaultdict(list)
     for item in actionable["pending_moves"]:
-        fname = item["suggested_folder_name"]
-        fid = item.get("existing_folder_id") or name_to_id.get(fname.lower())
+        fname = item["folder_name"]
+        fid = item.get("folder_id") or name_to_id.get(fname.lower())
         if fid:
-            groups[fid].append(item["record_id"])
+            groups[fid].append(item["id"])
 
     for fid, ids in groups.items():
         outcome = move_records_to_folder(ids, fid)

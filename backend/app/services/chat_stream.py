@@ -13,17 +13,12 @@ from app.services.chat_classify_plan import (
     apply_classify_plan,
     build_classify_plan,
     build_classify_plan_block,
+    classify_plan_hint,
     execution_summary,
     plan_actionable_work,
     resolve_classify_refs,
 )
-from app.services.chat_intent import (
-    classify_turn,
-    is_classify_action,
-    is_classify_mutate_turn,
-    should_execute_classify_tools,
-    tool_choice_for_round,
-)
+from app.services.chat_intent import TurnIntent, infer_turn_intent, tool_choice_for_round
 from app.services.subtitle_store import get_record, infer_source, list_record_ids_in_folder
 from app.services.folder_store import get_folder, is_uncategorized_folder_id
 
@@ -152,32 +147,22 @@ def build_messages(
     reference_record_ids: list[str],
     reference_folder_ids: list[str] | None = None,
     *,
-    intent: str = "read",
+    turn: TurnIntent | None = None,
 ) -> list[dict[str, Any]]:
     ref_ids = [x for x in reference_record_ids if x]
     folder_ids = [x for x in (reference_folder_ids or []) if x]
     eff_ref_ids, eff_folder_ids = ref_ids, folder_ids
-    if intent == "write" and is_classify_action(
-        user_message,
-        history,
-        reference_folder_ids=folder_ids,
-        reference_record_ids=ref_ids,
-    ):
+    if turn and turn.is_classify:
         eff_ref_ids, eff_folder_ids = resolve_classify_refs(ref_ids, folder_ids, history)
 
     ref_block = _build_reference_block(ref_ids)
     folder_block = _build_folder_reference_block(
-        eff_folder_ids if intent == "write" else folder_ids,
-        summary_only=(intent == "write"),
+        eff_folder_ids if (turn and turn.is_classify) else folder_ids,
+        summary_only=bool(turn and turn.is_classify),
     )
     system = SYSTEM_PROMPT
     blocks = [b for b in (ref_block, folder_block) if b]
-    if intent == "write" and is_classify_action(
-        user_message,
-        history,
-        reference_folder_ids=folder_ids,
-        reference_record_ids=ref_ids,
-    ):
+    if turn and turn.is_classify:
         plan_block = build_classify_plan_block(eff_ref_ids, eff_folder_ids, history)
         if plan_block:
             blocks.append(plan_block)
@@ -234,28 +219,27 @@ async def sse_chat_stream(
     folder_ids = [x for x in (reference_folder_ids or []) if x]
     try:
         history = chat_store.get_messages(thread_id)
-        intent = classify_turn(
+        client, model = _llm_client()
+        hint = classify_plan_hint(ref_ids, folder_ids, history)
+        turn = await infer_turn_intent(
+            client,
+            model,
             user_message,
             history,
-            reference_folder_ids=folder_ids,
             reference_record_ids=ref_ids,
+            reference_folder_ids=folder_ids,
+            classify_hint=hint,
         )
-        messages = build_messages(history, user_message, ref_ids, folder_ids, intent=intent)
-        client, model = _llm_client()
+        messages = build_messages(history, user_message, ref_ids, folder_ids, turn=turn)
         full = ""
 
-        # ponytail: 分类编排 — 先判是否有必要写库，再决定是否调工具
-        if is_classify_mutate_turn(
-            user_message,
-            history,
-            reference_folder_ids=folder_ids,
-            reference_record_ids=ref_ids,
-        ):
+        # ponytail: 分类编排 — LLM 判 execute_tools，服务端执行 create/move
+        if turn.is_classify:
             eff_ref_ids, eff_folder_ids = resolve_classify_refs(ref_ids, folder_ids, history)
             plan = build_classify_plan(eff_ref_ids, eff_folder_ids, history)
             actionable = plan_actionable_work(plan)
 
-            if should_execute_classify_tools(plan, user_message, history):
+            if turn.execute_tools:
                 steps, plan = apply_classify_plan(eff_ref_ids, eff_folder_ids, history)
                 for step in steps:
                     name = step["name"]
@@ -275,14 +259,12 @@ async def sse_chat_stream(
                     }
                 )
             else:
-                hint = (
-                    "请基于上方预分析输出分类方案（Markdown 表格），本轮不要调用任何工具。"
-                )
+                hint_msg = "请基于上方预分析输出分类方案（Markdown 表格），本轮不要调用任何工具。"
                 if not actionable["has_work"]:
-                    hint += "当前引用范围内无需新建文件夹或移动笔记（可能已在目标分类），请直接说明现状。"
+                    hint_msg += "当前引用范围内无需新建文件夹或移动笔记，请直接说明现状。"
                 else:
-                    hint += "若用户确认执行，可说「按此执行」或「自动分类」。"
-                messages.append({"role": "user", "content": hint})
+                    hint_msg += "用户若确认执行，可回复要求落库。"
+                messages.append({"role": "user", "content": hint_msg})
 
             stream = await client.chat.completions.create(
                 model=model,
@@ -298,8 +280,10 @@ async def sse_chat_stream(
                     full += piece
                     yield f"data: {json.dumps({'delta': piece}, ensure_ascii=False)}\n\n"
             if not full.strip():
-                if actionable["has_work"]:
-                    full = "已生成分类方案；确认后回复「按此执行」即可落库。"
+                if turn.execute_tools:
+                    full = "已完成分类工具调用。"
+                elif actionable["has_work"]:
+                    full = "已生成分类方案；确认后可要求执行落库。"
                 else:
                     full = "当前引用范围内没有需要移动的笔记，分类已是最新状态。"
                 yield f"data: {json.dumps({'delta': full}, ensure_ascii=False)}\n\n"
@@ -307,6 +291,7 @@ async def sse_chat_stream(
             yield f"data: {json.dumps({'done': True}, ensure_ascii=False)}\n\n"
             return
 
+        intent = turn.tool_intent
         tools = chat_tools.get_openai_tools(intent=intent)
 
         for round_idx in range(_MAX_TOOL_ROUNDS):
@@ -323,7 +308,7 @@ async def sse_chat_stream(
                 if msg.content:
                     full = msg.content
                 # ponytail: write 首轮未调工具则补编排 user 消息，促发 create/move
-                if intent == "write" and round_idx == 0:
+                if intent == "write" and round_idx == 0 and turn.execute_tools:
                     messages.append(
                         {
                             "role": "assistant",
