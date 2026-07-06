@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -27,7 +28,8 @@ SYSTEM_PROMPT = """你是笔记分析助手。用户会引用本地库中的 B �
 回答使用 Markdown，代码用 fenced code block。简洁准确。
 
 你还可通过工具操作本地笔记库（查看、分类、提取链接、移动、删除、导出）。
-需要实际改动库数据或拉取新笔记时调用工具；纯分析/问答时直接回答。"""
+需要实际改动库数据或拉取新笔记时调用工具；纯分析/问答时直接回答。
+查未分类笔记时优先 list_records(folder_name="未分类", include_text=true)；get_record 必须带 id 或 ids。"""
 
 # ponytail: 单条引用最多字符，避免撑爆上下文
 REF_CHAR_LIMIT = 12000
@@ -141,6 +143,105 @@ def _build_reference_block(record_ids: list[str]) -> str:
     return "以下为用户引用的本地库笔记：\n\n" + "\n\n---\n\n".join(parts)
 
 
+def _uncategorized_query_block(user_message: str) -> str:
+    """未分类查询时预加载正文，避免模型空参 get_record。"""
+    if "未分类" not in user_message:
+        return ""
+    result = chat_tools.execute(
+        "list_records",
+        {"folder_name": "未分类", "include_text": True, "limit": 50},
+    )
+    try:
+        parsed = json.loads(result)
+    except json.JSONDecodeError:
+        return ""
+    if not parsed.get("ok"):
+        return ""
+    records = parsed.get("records") or []
+    if not records:
+        return "当前未分类文件夹为空。"
+    lines: list[str] = []
+    for rec in records:
+        rid = rec.get("id") or ""
+        title = rec.get("title") or rid
+        text = (rec.get("text") or "").strip()
+        if len(text) > 2000:
+            text = text[:2000] + "\n…（已截断）"
+        lines.append(f"### {title} (id={rid})\n\n{text or '（无正文）'}")
+    return (
+        f"以下未分类笔记正文已由系统预加载（共 {len(records)} 条），请直接分析，勿再调用 get_record：\n\n"
+        + "\n\n---\n\n".join(lines)
+    )
+
+
+def _ids_from_recent_text(messages: list[dict[str, Any]], user_message: str) -> list[str]:
+    """从最近对话文本提取 12 位笔记 id（如 #7368ee9aac7f）。"""
+    chunks: list[str] = [user_message]
+    for m in reversed(messages):
+        if m.get("role") not in ("user", "assistant"):
+            continue
+        text = (m.get("content") or "").strip()
+        if text:
+            chunks.append(text)
+        if len(chunks) >= 6:
+            break
+    found: list[str] = []
+    for text in chunks:
+        for rid in re.findall(r"(?:#|`)([a-f0-9]{12})\b", text, flags=re.I):
+            if rid not in found:
+                found.append(rid)
+    return found
+
+
+def _last_list_record_ids(messages: list[dict[str, Any]], *, uncategorized_only: bool = False) -> list[str]:
+    for m in reversed(messages):
+        if m.get("role") != "tool":
+            continue
+        try:
+            parsed = json.loads(m.get("content") or "")
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(parsed, dict) or not isinstance(parsed.get("records"), list):
+            continue
+        ids = [str(r.get("id") or "").strip() for r in parsed["records"] if str(r.get("id") or "").strip()]
+        if ids:
+            return ids
+    if uncategorized_only:
+        try:
+            parsed = json.loads(
+                chat_tools.execute("list_records", {"folder_name": "未分类", "limit": 50})
+            )
+            return [str(r.get("id") or "").strip() for r in parsed.get("records") or [] if r.get("id")]
+        except json.JSONDecodeError:
+            pass
+    return []
+
+
+def _repair_tool_args(
+    tool_name: str,
+    args: dict[str, Any],
+    messages: list[dict[str, Any]],
+    user_message: str,
+) -> dict[str, Any]:
+    """ponytail: 模型空参时从 list_records 结果或对话 id 回填。"""
+    if tool_name == "get_record":
+        if chat_tools._record_id(args) or chat_tools._record_ids(args):
+            return args
+        uncat = "未分类" in user_message
+        ids = _last_list_record_ids(messages, uncategorized_only=uncat)
+        if ids:
+            return {"ids": ids[:20]}
+    if tool_name == "move_records":
+        if chat_tools._record_ids(args):
+            return args
+        ids = _ids_from_recent_text(messages, user_message)
+        if ids:
+            repaired = dict(args)
+            repaired["ids"] = ids
+            return repaired
+    return args
+
+
 def build_messages(
     history: list[dict[str, str]],
     user_message: str,
@@ -166,6 +267,10 @@ def build_messages(
         plan_block = build_classify_plan_block(eff_ref_ids, eff_folder_ids, history)
         if plan_block:
             blocks.append(plan_block)
+    elif turn and turn.mode in ("read", "query") and "未分类" in user_message:
+        uncat_block = _uncategorized_query_block(user_message)
+        if uncat_block:
+            blocks.append(uncat_block)
     if blocks:
         system = f"{SYSTEM_PROMPT}\n\n" + "\n\n".join(blocks)
 
@@ -359,6 +464,8 @@ async def sse_chat_stream(
                 break
 
             messages.append(msg.model_dump(exclude_none=True))
+            round_get_record_missing = 0
+            round_get_record_total = 0
             for tc in msg.tool_calls:
                 fn = tc.function
                 tool_name = fn.name or ""
@@ -366,12 +473,17 @@ async def sse_chat_stream(
                     args = json.loads(fn.arguments or "{}")
                 except json.JSONDecodeError:
                     args = {}
+                args = _repair_tool_args(tool_name, args, messages, user_message)
 
                 yield f"data: {json.dumps({'tool_start': _tool_sse_start(tool_name)}, ensure_ascii=False)}\n\n"
 
                 result = chat_tools.execute(tool_name, args)
                 ok = _tool_ok(result)
                 preview = _tool_preview(result)
+                if tool_name == "get_record":
+                    round_get_record_total += 1
+                    if not ok and "缺少" in preview:
+                        round_get_record_missing += 1
                 meta = _tool_step_dict(tool_name)
                 tool_steps.append({**meta, "ok": ok, "preview": preview, "status": "done"})
                 yield f"data: {json.dumps({'tool_end': {'name': tool_name, 'ok': ok, 'preview': preview}}, ensure_ascii=False)}\n\n"
@@ -381,6 +493,17 @@ async def sse_chat_stream(
                         "role": "tool",
                         "tool_call_id": tc.id,
                         "content": result,
+                    }
+                )
+
+            if round_get_record_total and round_get_record_missing == round_get_record_total:
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": (
+                            "get_record 必须传 id 或 ids（来自 list_records.records[].id）。"
+                            "批量读正文请用 list_records(folder_name=\"未分类\", include_text=true)。"
+                        ),
                     }
                 )
 

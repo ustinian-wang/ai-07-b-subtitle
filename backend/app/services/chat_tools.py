@@ -6,10 +6,12 @@ from typing import Any
 
 from app.services.bilibili import BilibiliError, fetch_subtitles, format_subtitle_text, parse_bilibili_ref
 from app.services.folder_store import (
+    UNCATEGORIZED_FOLDER_ID,
     create_folder,
     get_folder,
     is_system_folder,
     is_uncategorized_folder_id,
+    list_folders,
     list_user_folders,
 )
 from app.services.platform import detect_platform
@@ -21,6 +23,7 @@ from app.services.subtitle_store import (
     find_by_xhs_note_id,
     get_record,
     infer_source,
+    list_record_ids_in_folder,
     list_records,
     move_records_to_folder,
     upsert_record,
@@ -56,8 +59,16 @@ def tool_label(name: str) -> str:
 
 
 def _record_id(args: dict[str, Any]) -> str:
-    """笔记 id，与存储字段 record.id / list_records.id 一致。"""
-    return str(args.get("id") or args.get("record_id") or "").strip()
+    """笔记 id，与存储字段 record.id / list_records.id 一致；兼容模型常见误参。"""
+    for key in ("id", "record_id", "recordId", "note_id"):
+        val = args.get(key)
+        if val is not None and str(val).strip():
+            return str(val).strip()
+    for key in ("ids", "record_ids"):
+        raw = args.get(key)
+        if isinstance(raw, list) and len(raw) == 1 and str(raw[0] or "").strip():
+            return str(raw[0]).strip()
+    return ""
 
 
 def _record_ids(args: dict[str, Any]) -> list[str]:
@@ -78,7 +89,9 @@ def _folder_id_by_name(name: str) -> str | None:
     key = (name or "").strip().lower()
     if not key:
         return None
-    for folder in list_user_folders():
+    if key in ("未分类", "uncategorized"):
+        return UNCATEGORIZED_FOLDER_ID
+    for folder in list_folders():
         if (folder.get("name") or "").strip().lower() == key:
             return folder.get("id")
     return None
@@ -93,6 +106,8 @@ def _resolve_folder_target(args: dict[str, Any]) -> tuple[str | None, str | None
         fid = _folder_id_by_name(str(args["folder_name"]))
         if not fid:
             return None, f"文件夹不存在: {args['folder_name']}"
+        if is_uncategorized_folder_id(fid):
+            return None, None
         return fid, None
     folder_id = args.get("folder_id")
     if folder_id is None or folder_id == "":
@@ -110,11 +125,23 @@ def get_openai_tools(*, intent: str | None = None) -> list[dict[str, Any]]:
     specs: list[tuple[str, str, dict[str, Any]]] = [
         (
             "list_records",
-            "列出本地笔记库摘要，可按关键词过滤标题。",
+            "列出本地笔记摘要；可按文件夹/关键词过滤。需正文时用 include_text=true，避免逐条 get_record。",
             {
                 "type": "object",
                 "properties": {
                     "keyword": {"type": "string", "description": "可选，标题关键词（不区分大小写）"},
+                    "folder_id": {
+                        "type": "string",
+                        "description": "按文件夹 id 过滤（同 folders[].id，未分类用 __uncategorized__）",
+                    },
+                    "folder_name": {
+                        "type": "string",
+                        "description": "按文件夹名过滤，如「未分类」「首尔」",
+                    },
+                    "include_text": {
+                        "type": "boolean",
+                        "description": "true 时在每条 records[] 附带 text 正文（每条最多 4000 字）",
+                    },
                     "limit": {
                         "type": "integer",
                         "description": "最多返回条数，默认 30，最大 100",
@@ -127,13 +154,17 @@ def get_openai_tools(*, intent: str | None = None) -> list[dict[str, Any]]:
         ),
         (
             "get_record",
-            "读取单条笔记详情（含正文 text）。参数 id 同 list_records 返回的 id。",
+            "读取一条或多条笔记详情（含 text）。必须传 id 或 ids（来自 list_records.records[].id），禁止空参。",
             {
                 "type": "object",
                 "properties": {
-                    "id": {"type": "string", "description": "笔记 id（同 records[].id）"},
+                    "id": {"type": "string", "description": "单条笔记 id（同 records[].id）"},
+                    "ids": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "批量 id 列表（同 records[].id）",
+                    },
                 },
-                "required": ["id"],
                 "additionalProperties": False,
             },
         ),
@@ -266,27 +297,95 @@ def execute(name: str, arguments: dict[str, Any]) -> str:
         return json.dumps({"ok": False, "error": str(err)}, ensure_ascii=False)
 
 
+def _truncate_text(text: str, limit: int = 4000) -> str:
+    if len(text) <= limit:
+        return text
+    return text[:limit] + "\n…（已截断）"
+
+
 def _list_records(args: dict[str, Any]) -> str:
     keyword = str(args.get("keyword") or "").strip().lower()
     limit = min(max(int(args.get("limit") or 30), 1), 100)
+    include_text = bool(args.get("include_text"))
     items = list_records()
+
+    folder_id = args.get("folder_id")
+    folder_name = args.get("folder_name")
+    filter_fid: str | None = None
+    if folder_name:
+        filter_fid = _folder_id_by_name(str(folder_name))
+        if not filter_fid:
+            return json.dumps({"ok": False, "error": f"文件夹不存在: {folder_name}"}, ensure_ascii=False)
+    elif folder_id is not None and str(folder_id).strip():
+        fid = str(folder_id).strip()
+        filter_fid = UNCATEGORIZED_FOLDER_ID if is_uncategorized_folder_id(fid) else fid
+        if filter_fid != UNCATEGORIZED_FOLDER_ID and not get_folder(filter_fid):
+            return json.dumps({"ok": False, "error": f"文件夹不存在: {fid}"}, ensure_ascii=False)
+
+    if filter_fid:
+        allowed = set(list_record_ids_in_folder(filter_fid))
+        items = [x for x in items if x.get("id") in allowed]
+
     if keyword:
         items = [x for x in items if keyword in (x.get("title") or "").lower()]
     items = items[:limit]
+
+    if include_text:
+        enriched: list[dict[str, Any]] = []
+        for item in items:
+            rec = get_record(str(item.get("id") or ""))
+            row = dict(item)
+            if rec:
+                row["text"] = _truncate_text(rec.get("text") or "", 4000)
+            else:
+                row["text"] = ""
+            enriched.append(row)
+        items = enriched
+
     return json.dumps({"ok": True, "count": len(items), "records": items}, ensure_ascii=False)
 
 
 def _get_record(args: dict[str, Any]) -> str:
-    rid = _record_id(args)
-    if not rid:
-        return json.dumps({"ok": False, "error": "缺少 id"}, ensure_ascii=False)
-    rec = get_record(rid)
-    if not rec:
-        return json.dumps({"ok": False, "error": f"笔记不存在: {rid}"}, ensure_ascii=False)
-    text = rec.get("text") or ""
-    if len(text) > 12000:
-        rec = {**rec, "text": text[:12000] + "\n…（已截断）"}
-    return json.dumps({"ok": True, "record": rec}, ensure_ascii=False)
+    ids = _record_ids(args)
+    if not ids:
+        rid = _record_id(args)
+        if rid:
+            ids = [rid]
+    if not ids:
+        return json.dumps(
+            {
+                "ok": False,
+                "error": "缺少 id/ids",
+                "hint": "传 id 或 ids（来自 list_records.records[].id）；批量正文可用 list_records(include_text=true)",
+            },
+            ensure_ascii=False,
+        )
+    if len(ids) == 1:
+        rid = ids[0]
+        rec = get_record(rid)
+        if not rec:
+            return json.dumps({"ok": False, "error": f"笔记不存在: {rid}"}, ensure_ascii=False)
+        text = rec.get("text") or ""
+        if len(text) > 12000:
+            rec = {**rec, "text": text[:12000] + "\n…（已截断）"}
+        return json.dumps({"ok": True, "record": rec}, ensure_ascii=False)
+
+    # ponytail: 批量读取上限 20 条，避免 token 爆炸
+    records: list[dict[str, Any]] = []
+    missing: list[str] = []
+    for rid in ids[:20]:
+        rec = get_record(rid)
+        if not rec:
+            missing.append(rid)
+            continue
+        text = rec.get("text") or ""
+        if len(text) > 8000:
+            rec = {**rec, "text": text[:8000] + "\n…（已截断）"}
+        records.append(rec)
+    return json.dumps(
+        {"ok": True, "count": len(records), "records": records, "missing": missing},
+        ensure_ascii=False,
+    )
 
 
 def _list_folders(_args: dict[str, Any]) -> str:
@@ -464,4 +563,11 @@ if __name__ == "__main__":
     assert _record_ids({"ids": ["a"]}) == ["a"]
     assert _record_ids({"record_ids": ["b"]}) == ["b"]
     assert _record_id({"id": "c"}) == "c"
+    assert _record_id({"record_ids": ["d"]}) == "d"
+    assert _folder_id_by_name("未分类") == UNCATEGORIZED_FOLDER_ID
+    empty = json.loads(_get_record({}))
+    assert empty.get("ok") is False
+    assert "缺少" in str(empty.get("error", ""))
+    listed = json.loads(_list_records({"folder_name": "未分类", "limit": 5}))
+    assert listed.get("ok") is True
     print("chat_tools self-check ok")
