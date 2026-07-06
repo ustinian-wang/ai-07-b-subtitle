@@ -1,0 +1,35 @@
+backend/app/services/chat_store.py
+  s_736c93b51a67e7::t_f0af079c82b972 65,71-100
+  s_736c93b51a67e7::t_82f837643fdd08 246-249
+  s_736c93b51a67e7::t_0cc7e48d2820aa 101-102
+backend/app/services/chat_task_state.py
+  s_736c93b51a67e7::t_6973f6ad62a021 1-123,129-229
+  s_736c93b51a67e7::t_0998bbdd055e8e 124-128
+backend/app/services/chat_stream.py
+  s_736c93b51a67e7::t_e6ae828730b237 615-616
+  s_736c93b51a67e7::t_fce27d523922b9 389
+  s_736c93b51a67e7::t_47fb75983cebe2 498-499
+  s_736c93b51a67e7::t_922989fc9b04fa 435
+  s_736c93b51a67e7::t_ac82b4e0a179d5 23-29
+  s_736c93b51a67e7::t_0d80ccbfed6a6d 410-421
+  s_736c93b51a67e7::t_369783feae8181 342-388,390-393
+  s_736c93b51a67e7::t_c1289bbd829cdf 473
+  s_736c93b51a67e7::t_de06e51bf05f4f 496-497
+  s_736c93b51a67e7::t_634288e93c79f2 613
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "d0aa1f432859cd62edf76b97969bbe0930515a04",
+  "prompts": {},
+  "sessions": {
+    "s_736c93b51a67e7": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "d38e583a-0c3d-4908-afcb-77ee91a8bf78",
+        "model": "default"
+      },
+      "human_author": "jser <87244899@qq.com>"
+    }
+  }
+}
