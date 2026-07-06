@@ -1,0 +1,35 @@
+backend/app/services/agent/planner.py
+  s_49c5a6ae1e7872::t_983e208a7d3899 29-30,86,89-95,107-111,184,186-189,210-224,280-284
+backend/app/services/agent/router.py
+  s_49c5a6ae1e7872::t_4a61ca0a825a4f 5,21-22,29,31,35-36,81-85,130-137,169-170
+backend/app/services/chat_classify_plan.py
+  s_49c5a6ae1e7872::t_377307dc4ca9e3 71-73,84-121,127-131,133,135-137,264-276,281-282,287,294,317,325-327,479-481
+backend/app/services/chat_stream.py
+  s_49c5a6ae1e7872::t_71191da3b095f4 608-613
+backend/app/services/chat_task_state.py
+  s_736c93b51a67e7::t_b2940360444b5a 42-43,68-69,121-169,179,181-186,304,306-308,337-351
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "4e20908cb5e01086ceb48d53250fa918e996ae40",
+  "prompts": {},
+  "sessions": {
+    "s_49c5a6ae1e7872": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "15965405-bab8-4e85-a67b-d0a91e38505d",
+        "model": "default"
+      },
+      "human_author": "jser <87244899@qq.com>"
+    },
+    "s_736c93b51a67e7": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "d38e583a-0c3d-4908-afcb-77ee91a8bf78",
+        "model": "default"
+      },
+      "human_author": "jser <87244899@qq.com>"
+    }
+  }
+}
