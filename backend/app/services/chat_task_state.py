@@ -7,7 +7,7 @@ from collections import defaultdict
 from typing import Any
 
 from app.services import chat_tools
-from app.services.folder_store import list_user_folders
+from app.services.folder_store import list_folders
 
 _CONFIRM_EXACT = frozenset(
     {
@@ -17,7 +17,10 @@ _CONFIRM_EXACT = frozenset(
         "yes",
         "好的",
         "好",
+        "好呀",
+        "好啊",
         "行",
+        "行啊",
         "执行",
         "确认",
         "继续",
@@ -27,18 +30,44 @@ _CONFIRM_EXACT = frozenset(
         "移过去",
         "去执行",
         "开始执行",
+        "去",
+        "愿意",
+        "嗯",
+        "嗯嗯",
+        "同意",
     }
 )
+_DENY_PREFIX = ("不", "别", "不要", "取消", "算了", "不用")
 _ID_IN_TEXT = re.compile(r"(?:#|`|\()([a-f0-9]{12})\)?", re.I)
 
 
-def detect_confirmation(user_message: str) -> bool:
+def _is_denial(text: str) -> bool:
+    t = (text or "").strip().lower()
+    if not t:
+        return False
+    if t in ("no", "n", "否"):
+        return True
+    return any(t == p or t.startswith(p) for p in _DENY_PREFIX)
+
+
+def detect_confirmation(
+    user_message: str,
+    *,
+    pending_plan: dict[str, Any] | None = None,
+    awaiting_confirmation: bool = False,
+) -> bool:
     t = (user_message or "").strip().lower()
     if not t:
         return False
     if t in _CONFIRM_EXACT:
         return True
-    return any(t == k or t.startswith(k) for k in ("可以", "好的", "确认执行"))
+    if any(t == k or t.startswith(k) for k in ("可以", "好的", "确认执行")):
+        return True
+    # ponytail: 有待确认方案时，短句非否定回复视为确认
+    if pending_plan or awaiting_confirmation:
+        if len(t) <= 8 and not _is_denial(t):
+            return True
+    return False
 
 
 def extract_ids_from_text(*texts: str) -> list[str]:
@@ -52,9 +81,13 @@ def extract_ids_from_text(*texts: str) -> list[str]:
 
 
 def infer_folder_name_from_text(*texts: str) -> str | None:
-    """从对话文本推断目标文件夹名（匹配已有文件夹或常见句式）。"""
-    known = { (f.get("name") or "").strip(): f.get("name") for f in list_user_folders() if f.get("name") }
-    lower_map = { k.lower(): v for k, v in known.items() if k }
+    """从对话文本推断目标文件夹名（与 chat_tools.resolve_folder_name 对齐）。"""
+    known = {
+        (f.get("name") or "").strip(): f.get("name")
+        for f in list_folders()
+        if f.get("name")
+    }
+    lower_map = {k.lower(): v for k, v in known.items() if k}
 
     for text in texts:
         if not text:
@@ -62,20 +95,22 @@ def infer_folder_name_from_text(*texts: str) -> str | None:
         for name in known:
             if name and name in text:
                 if re.search(rf"(移|放|归|入|到|进).{{0,12}}{re.escape(name)}", text):
-                    return name
+                    return chat_tools.resolve_folder_name(name) or name
                 if re.search(rf"{re.escape(name)}.{0,8}文件夹", text):
-                    return name
+                    return chat_tools.resolve_folder_name(name) or name
         m = re.search(r"[「【]([^」】]{1,20})[」】].{0,8}文件夹", text)
         if m:
-            key = m.group(1).strip().lower()
-            if key in lower_map:
-                return lower_map[key]
+            resolved = chat_tools.resolve_folder_name(m.group(1))
+            if resolved:
+                return resolved
         m = re.search(r"移(?:动)?到[「【]?(\S{1,20})[」】]?(?:文件夹)?", text)
         if m:
-            key = m.group(1).strip().lower()
+            resolved = chat_tools.resolve_folder_name(m.group(1))
+            if resolved:
+                return resolved
+            key = chat_tools.normalize_folder_name(m.group(1)).lower()
             if key in lower_map:
                 return lower_map[key]
-            return m.group(1).strip()
     return None
 
 
@@ -100,19 +135,33 @@ def build_move_plan_from_history(
     }
 
 
-def plan_from_classify_actionable(plan: dict[str, Any], actionable: dict[str, Any]) -> dict[str, Any] | None:
-    """将 classify 预分析转为 pending_plan。"""
+def build_move_to_uncategorized_plan(ids: list[str]) -> dict[str, Any]:
+    return {
+        "goal": "move_records",
+        "steps": [
+            {"tool": "move_records", "args": {"ids": ids, "folder_name": "未分类"}},
+        ],
+    }
+
+
+def plan_from_classify_actionable(plan: dict[str, Any], actionable: dict[str, Any]) -> dict[str, Any]:
+    """将 classify 预分析转为 pending_plan（无工作时也写入显式 plan）。"""
+    meta = {
+        "skip_collection": plan.get("skip_collection") or [],
+        "skip_unknown": plan.get("skip_unknown") or [],
+    }
     if not actionable.get("has_work"):
-        return None
+        return {
+            "goal": "classify",
+            "steps": [],
+            "meta": {**meta, "reason": "当前引用范围内无需新建文件夹或移动笔记"},
+        }
+
     steps: list[dict[str, Any]] = []
     for fname in actionable.get("folders_to_create") or []:
         steps.append({"tool": "create_folder", "args": {"name": fname}})
 
     groups: dict[str, list[str]] = defaultdict(list)
-    name_to_id = { (f.get("name") or "").lower(): f.get("id") for f in list_user_folders() if f.get("name") }
-    for fname in actionable.get("folders_to_create") or []:
-        name_to_id[fname.lower()] = fname  # placeholder until create
-
     for item in actionable.get("pending_moves") or []:
         fname = item.get("folder_name") or ""
         rid = item.get("id")
@@ -132,15 +181,10 @@ def plan_from_classify_actionable(plan: dict[str, Any], actionable: dict[str, An
             args["folder_name"] = fname
         steps.append({"tool": "move_records", "args": args})
 
-    if not steps:
-        return None
     return {
         "goal": "classify",
         "steps": steps,
-        "meta": {
-            "skip_collection": plan.get("skip_collection") or [],
-            "skip_unknown": plan.get("skip_unknown") or [],
-        },
+        "meta": meta,
     }
 
 
@@ -213,7 +257,13 @@ def offer_move_plan_from_assistant(assistant_text: str) -> dict[str, Any] | None
 def _self_check() -> None:
     assert detect_confirmation("可以")
     assert detect_confirmation("OK")
+    assert detect_confirmation("去")
+    assert detect_confirmation("愿意")
+    assert detect_confirmation("嗯", awaiting_confirmation=True)
     assert not detect_confirmation("未分类有多少")
+    assert not detect_confirmation("不要", awaiting_confirmation=True)
+    assert infer_folder_name_from_text("移到未分类下") == "未分类"
+    assert chat_tools.normalize_folder_name("首尔下") == "首尔"
     ids = extract_ids_from_text("见 #7368ee9aac7f 和 `83407f062c80`")
     assert len(ids) == 2
     plan = build_move_plan_from_history(
@@ -222,6 +272,10 @@ def _self_check() -> None:
     )
     assert plan and plan["steps"][0]["tool"] == "move_records"
     assert plan["steps"][0]["args"]["folder_name"] == "首尔"
+    empty = plan_from_classify_actionable({"skip_collection": [], "skip_unknown": []}, {"has_work": False})
+    assert empty["goal"] == "classify" and empty["meta"].get("reason")
+    uncat = build_move_to_uncategorized_plan(["abc123"])
+    assert uncat["steps"][0]["args"]["folder_name"] == "未分类"
 
 
 if __name__ == "__main__":

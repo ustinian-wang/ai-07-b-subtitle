@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 from app.services.bilibili import BilibiliError, fetch_subtitles, format_subtitle_text, parse_bilibili_ref
@@ -43,7 +44,7 @@ _TOOL_META: dict[str, dict[str, str]] = {
     "get_record": {"category": "library", "label": "读取笔记详情"},
     "list_folders": {"category": "folder", "label": "列出文件夹"},
     "create_folder": {"category": "folder", "label": "新建文件夹"},
-    "move_records": {"category": "folder", "label": "移动笔记到文件夹"},
+    "move_records": {"category": "folder", "label": "批量移动笔记到文件夹"},
     "extract_note": {"category": "extract", "label": "从链接提取笔记"},
     "delete_records": {"category": "manage", "label": "删除笔记"},
     "export_records": {"category": "manage", "label": "导出笔记"},
@@ -72,23 +73,62 @@ def _record_id(args: dict[str, Any]) -> str:
 
 
 def _record_ids(args: dict[str, Any]) -> list[str]:
-    """笔记 id 列表，兼容旧参数 record_ids。"""
+    """笔记 id 列表，兼容 record_ids、逗号分隔字符串。"""
     raw: Any = args.get("ids")
     if raw is None:
         raw = args.get("record_ids")
     if raw is None and args.get("id"):
         raw = [args.get("id")]
     if isinstance(raw, str):
-        raw = [raw]
+        raw = [x.strip() for x in raw.split(",") if x.strip()]
     if not isinstance(raw, list):
         return []
-    return [str(x).strip() for x in raw if str(x).strip()]
+    out: list[str] = []
+    for x in raw:
+        part = str(x or "").strip()
+        if not part:
+            continue
+        if "," in part:
+            out.extend(p.strip() for p in part.split(",") if p.strip())
+        elif part not in out:
+            out.append(part)
+    return out
+
+
+_FOLDER_SUFFIX_RE = re.compile(r"(?:下|里|内|文件夹)$")
+
+
+def normalize_folder_name(name: str) -> str:
+    """去掉「下/里/内/文件夹」等后缀，便于与 list_folders 对齐。"""
+    key = (name or "").strip()
+    while key:
+        m = _FOLDER_SUFFIX_RE.search(key)
+        if not m:
+            break
+        key = key[: m.start()].strip()
+    return key
+
+
+def resolve_folder_name(name: str) -> str | None:
+    """规范化文件夹名并匹配已知文件夹（含系统「未分类」）。"""
+    raw = normalize_folder_name(name)
+    if not raw:
+        return None
+    key = raw.lower()
+    if key in ("未分类", "uncategorized"):
+        return "未分类"
+    for folder in list_folders():
+        fname = (folder.get("name") or "").strip()
+        if fname.lower() == key:
+            return fname
+    return raw
 
 
 def _folder_id_by_name(name: str) -> str | None:
-    key = (name or "").strip().lower()
-    if not key:
+    resolved = resolve_folder_name(name)
+    if not resolved:
         return None
+    key = resolved.lower()
     if key in ("未分类", "uncategorized"):
         return UNCATEGORIZED_FOLDER_ID
     for folder in list_folders():
@@ -188,14 +228,21 @@ def get_openai_tools(*, intent: str | None = None) -> list[dict[str, Any]]:
         ),
         (
             "move_records",
-            "批量移动笔记；folder_id 同 folders[].id，folder_name 同 folders[].name；二者皆空表示未分类。",
+            "批量移动多条笔记到同一文件夹。必传 ids（或 record_ids）+ folder_name（或 folder_id）。"
+            "示例：{\"ids\":[\"abc\",\"def\"],\"folder_name\":\"首尔\"}。"
+            "若需一次移到多个不同文件夹，用 moves 数组。",
             {
                 "type": "object",
                 "properties": {
                     "ids": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "笔记 id 列表（同 records[].id）",
+                        "description": "笔记 id 列表（同 records[].id），单目标批量移动",
+                    },
+                    "record_ids": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "同 ids，兼容旧参数名",
                     },
                     "folder_id": {
                         "type": ["string", "null"],
@@ -205,8 +252,27 @@ def get_openai_tools(*, intent: str | None = None) -> list[dict[str, Any]]:
                         "type": "string",
                         "description": "目标文件夹名称（同 folders[].name），与 folder_id 二选一",
                     },
+                    "moves": {
+                        "type": "array",
+                        "description": "多目标批量移动，每项移动到不同文件夹",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "ids": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                    "description": "笔记 id 列表",
+                                },
+                                "record_ids": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                },
+                                "folder_id": {"type": ["string", "null"]},
+                                "folder_name": {"type": "string"},
+                            },
+                        },
+                    },
                 },
-                "required": ["ids"],
                 "additionalProperties": False,
             },
         ),
@@ -408,15 +474,81 @@ def _create_folder(args: dict[str, Any]) -> str:
     return json.dumps({"ok": True, "folder": folder}, ensure_ascii=False)
 
 
-def _move_records(args: dict[str, Any]) -> str:
+def _normalize_move_batches(args: dict[str, Any]) -> list[dict[str, Any]]:
+    """解析单目标或多目标批量移动参数。"""
+    raw_moves = args.get("moves")
+    if isinstance(raw_moves, list) and raw_moves:
+        batches: list[dict[str, Any]] = []
+        for item in raw_moves:
+            if not isinstance(item, dict):
+                continue
+            ids = _record_ids(item)
+            if not ids:
+                continue
+            batches.append({**item, "ids": ids})
+        if batches:
+            return batches
     ids = _record_ids(args)
-    if not ids:
-        return json.dumps({"ok": False, "error": "ids 不能为空"}, ensure_ascii=False)
-    folder_id, err = _resolve_folder_target(args)
+    if ids:
+        return [dict(args, ids=ids)]
+    return []
+
+
+def _move_one_batch(batch: dict[str, Any]) -> dict[str, Any]:
+    ids = _record_ids(batch)
+    folder_id, err = _resolve_folder_target(batch)
     if err:
-        return json.dumps({"ok": False, "error": err}, ensure_ascii=False)
-    result = move_records_to_folder(ids, folder_id)
-    return json.dumps({"ok": True, **result}, ensure_ascii=False)
+        return {"ok": False, "error": err, "moved": [], "failed": ids}
+    outcome = move_records_to_folder(ids, folder_id)
+    moved = outcome.get("moved") or []
+    failed = outcome.get("failed") or []
+    return {
+        "ok": not failed or bool(moved),
+        "folder_id": folder_id,
+        "folder_name": batch.get("folder_name"),
+        "moved": moved,
+        "failed": failed,
+    }
+
+
+def _move_records(args: dict[str, Any]) -> str:
+    batches = _normalize_move_batches(args)
+    if not batches:
+        return json.dumps(
+            {
+                "ok": False,
+                "error": "ids 或 moves 不能为空",
+                "hint": "单文件夹：ids+folder_name；多文件夹：moves=[{ids, folder_name}, ...]",
+            },
+            ensure_ascii=False,
+        )
+    if len(batches) == 1:
+        one = _move_one_batch(batches[0])
+        if one.get("error"):
+            return json.dumps({"ok": False, "error": one["error"]}, ensure_ascii=False)
+        return json.dumps(
+            {"ok": one["ok"], "moved": one["moved"], "failed": one["failed"]},
+            ensure_ascii=False,
+        )
+
+    details: list[dict[str, Any]] = []
+    all_moved: list[str] = []
+    all_failed: list[str] = []
+    for batch in batches:
+        one = _move_one_batch(batch)
+        details.append(one)
+        all_moved.extend(one.get("moved") or [])
+        all_failed.extend(one.get("failed") or [])
+    return json.dumps(
+        {
+            "ok": bool(all_moved) and not all_failed,
+            "batch_count": len(batches),
+            "moved": all_moved,
+            "failed": all_failed,
+            "details": details,
+        },
+        ensure_ascii=False,
+    )
 
 
 def _find_existing_bilibili(url: str, page: int, lang: str | None) -> dict[str, Any] | None:
@@ -562,12 +694,19 @@ if __name__ == "__main__":
     assert len(get_openai_tools()) == len(_TOOL_META)
     assert _record_ids({"ids": ["a"]}) == ["a"]
     assert _record_ids({"record_ids": ["b"]}) == ["b"]
+    assert _record_ids({"ids": "c1,c2"}) == ["c1", "c2"]
     assert _record_id({"id": "c"}) == "c"
     assert _record_id({"record_ids": ["d"]}) == "d"
     assert _folder_id_by_name("未分类") == UNCATEGORIZED_FOLDER_ID
+    assert _folder_id_by_name("未分类下") == UNCATEGORIZED_FOLDER_ID
+    assert normalize_folder_name("首尔下") == "首尔"
+    assert resolve_folder_name("未分类里") == "未分类"
     empty = json.loads(_get_record({}))
     assert empty.get("ok") is False
     assert "缺少" in str(empty.get("error", ""))
     listed = json.loads(_list_records({"folder_name": "未分类", "limit": 5}))
     assert listed.get("ok") is True
+    empty_move = json.loads(_move_records({}))
+    assert empty_move.get("ok") is False
+    assert "moves" in str(empty_move.get("hint", ""))
     print("chat_tools self-check ok")

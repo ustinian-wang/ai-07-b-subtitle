@@ -86,18 +86,32 @@ def save_task_state(thread_id: str, task_state: dict[str, Any] | None) -> None:
     path.write_text(json.dumps(snap, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def get_pending_plan(thread_id: str) -> dict[str, Any] | None:
+    plan = get_task_state(thread_id).get("pending_plan")
+    return plan if isinstance(plan, dict) else None
+
+
+def get_awaiting_confirmation(thread_id: str) -> bool:
+    return bool(get_task_state(thread_id).get("awaiting_confirmation"))
+
+
+def set_awaiting_confirmation(thread_id: str, value: bool) -> None:
+    state = get_task_state(thread_id)
+    if value:
+        state["awaiting_confirmation"] = True
+    else:
+        state.pop("awaiting_confirmation", None)
+    save_task_state(thread_id, state)
+
+
 def set_pending_plan(thread_id: str, plan: dict[str, Any] | None) -> None:
     state = get_task_state(thread_id)
     if plan:
         state["pending_plan"] = plan
     else:
         state.pop("pending_plan", None)
+        state.pop("awaiting_confirmation", None)
     save_task_state(thread_id, state)
-
-
-def get_pending_plan(thread_id: str) -> dict[str, Any] | None:
-    plan = get_task_state(thread_id).get("pending_plan")
-    return plan if isinstance(plan, dict) else None
 
 
 def append_exchange(thread_id: str, user: str, assistant: str) -> list[dict[str, Any]]:

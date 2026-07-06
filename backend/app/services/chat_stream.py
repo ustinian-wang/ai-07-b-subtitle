@@ -10,23 +10,12 @@ import httpx
 from openai import AsyncOpenAI
 
 from app.services import chat_store, chat_tools, settings_store
-from app.services.chat_classify_plan import (
-    apply_classify_plan,
-    build_classify_plan,
-    build_classify_plan_block,
-    classify_plan_hint,
-    execution_summary,
-    plan_actionable_work,
-    resolve_classify_refs,
-)
-from app.services.chat_intent import TurnIntent, infer_turn_intent, tool_choice_for_round
-from app.services.chat_task_state import (
-    build_move_plan_from_history,
-    detect_confirmation,
-    execute_plan,
-    offer_move_plan_from_assistant,
-    plan_from_classify_actionable,
-)
+from app.services.agent.router import RouteDecision
+from app.services.agent import executor as agent_executor
+from app.services.agent import memory as agent_memory
+from app.services.agent import planner as agent_planner
+from app.services.agent import router as agent_router
+from app.services.chat_intent import tool_choice_for_round
 from app.services.subtitle_store import get_record, infer_source, list_record_ids_in_folder
 from app.services.folder_store import get_folder, is_uncategorized_folder_id
 
@@ -239,12 +228,31 @@ def _repair_tool_args(
         if ids:
             return {"ids": ids[:20]}
     if tool_name == "move_records":
-        if chat_tools._record_ids(args):
-            return args
-        ids = _ids_from_recent_text(messages, user_message)
-        if ids:
-            repaired = dict(args)
-            repaired["ids"] = ids
+        repaired = dict(args)
+        ids = chat_tools._record_ids(repaired)
+        if not ids:
+            ids = _ids_from_recent_text(messages, user_message)
+            if ids:
+                repaired["ids"] = ids
+        if ids and not repaired.get("folder_name") and repaired.get("folder_id") is None:
+            from app.services.chat_task_state import infer_folder_name_from_text
+
+            chunks = [user_message]
+            for m in reversed(messages):
+                if m.get("role") in ("user", "assistant"):
+                    t = (m.get("content") or "").strip()
+                    if t:
+                        chunks.append(t)
+                if len(chunks) >= 6:
+                    break
+            folder = infer_folder_name_from_text(*chunks)
+            if folder:
+                repaired["folder_name"] = folder
+        if repaired.get("folder_name"):
+            resolved = chat_tools.resolve_folder_name(str(repaired["folder_name"]))
+            if resolved:
+                repaired["folder_name"] = resolved
+        if chat_tools._record_ids(repaired):
             return repaired
     return args
 
@@ -255,26 +263,16 @@ def build_messages(
     reference_record_ids: list[str],
     reference_folder_ids: list[str] | None = None,
     *,
-    turn: TurnIntent | None = None,
+    query_mode: bool = False,
 ) -> list[dict[str, Any]]:
     ref_ids = [x for x in reference_record_ids if x]
     folder_ids = [x for x in (reference_folder_ids or []) if x]
-    eff_ref_ids, eff_folder_ids = ref_ids, folder_ids
-    if turn and turn.is_classify:
-        eff_ref_ids, eff_folder_ids = resolve_classify_refs(ref_ids, folder_ids, history)
 
     ref_block = _build_reference_block(ref_ids)
-    folder_block = _build_folder_reference_block(
-        eff_folder_ids if (turn and turn.is_classify) else folder_ids,
-        summary_only=bool(turn and turn.is_classify),
-    )
+    folder_block = _build_folder_reference_block(folder_ids, summary_only=query_mode)
     system = SYSTEM_PROMPT
     blocks = [b for b in (ref_block, folder_block) if b]
-    if turn and turn.is_classify:
-        plan_block = build_classify_plan_block(eff_ref_ids, eff_folder_ids, history)
-        if plan_block:
-            blocks.append(plan_block)
-    elif turn and turn.mode in ("read", "query") and "未分类" in user_message:
+    if query_mode and "未分类" in user_message:
         uncat_block = _uncategorized_query_block(user_message)
         if uncat_block:
             blocks.append(uncat_block)
@@ -321,6 +319,12 @@ def _tool_preview(result: str) -> str:
                 return str(parsed["title"])[:120]
             if parsed.get("count") is not None:
                 return f"count={parsed['count']}"
+            moved = parsed.get("moved")
+            if isinstance(moved, list) and moved:
+                bc = parsed.get("batch_count")
+                if bc:
+                    return f"moved={len(moved)}, batches={bc}"
+                return f"moved={len(moved)}"
     except json.JSONDecodeError:
         pass
     return (result or "")[:120]
@@ -339,7 +343,7 @@ def _tool_ok(result: str) -> bool:
     return True
 
 
-async def _stream_pending_plan(
+async def _stream_execute_plan(
     client: AsyncOpenAI,
     model: str,
     thread_id: str,
@@ -347,10 +351,10 @@ async def _stream_pending_plan(
     history: list[dict[str, Any]],
     ref_ids: list[str],
     folder_ids: list[str],
-    pending: dict[str, Any],
+    plan: dict[str, Any],
 ) -> AsyncIterator[str]:
-    """执行 pending_plan 并流式回复。"""
-    exec_steps, summary = execute_plan(pending)
+    """Executor + LLM 汇报。"""
+    exec_steps, summary = agent_executor.run_plan(plan)
     tool_steps: list[dict[str, Any]] = []
     for step in exec_steps:
         name = step["name"]
@@ -361,15 +365,11 @@ async def _stream_pending_plan(
         tool_steps.append({**meta, "ok": ok, "preview": preview, "status": "done"})
         yield f"data: {json.dumps({'tool_end': {'name': name, 'ok': ok, 'preview': preview}}, ensure_ascii=False)}\n\n"
 
-    turn = TurnIntent(mode="write", execute_tools=True)
-    messages = build_messages(history, user_message, ref_ids, folder_ids, turn=turn)
+    messages = build_messages(history, user_message, ref_ids, folder_ids)
     messages.append(
         {
             "role": "user",
-            "content": (
-                f"系统已执行确认方案，结果 JSON：\n{json.dumps(summary, ensure_ascii=False)}\n"
-                "请用 Markdown 简要汇报：移动了多少条、是否有失败、未包含在方案中的笔记说明。"
-            ),
+            "content": agent_planner.execution_hint(plan, summary),
         }
     )
     full = ""
@@ -384,10 +384,144 @@ async def _stream_pending_plan(
             yield f"data: {json.dumps({'delta': piece}, ensure_ascii=False)}\n\n"
     if not full.strip():
         moved = summary.get("records_moved", 0)
-        full = f"已执行确认方案，成功移动 {moved} 条笔记。"
+        full = f"已执行方案，成功移动 {moved} 条笔记。"
         yield f"data: {json.dumps({'delta': full}, ensure_ascii=False)}\n\n"
     chat_store.append_turn(thread_id, user_message, full, tool_steps or None)
-    chat_store.set_pending_plan(thread_id, None)
+    agent_memory.clear_pending(thread_id)
+    yield f"data: {json.dumps({'done': True}, ensure_ascii=False)}\n\n"
+
+
+async def _stream_present_plan(
+    client: AsyncOpenAI,
+    model: str,
+    thread_id: str,
+    user_message: str,
+    history: list[dict[str, Any]],
+    ref_ids: list[str],
+    folder_ids: list[str],
+    plan: dict[str, Any],
+) -> AsyncIterator[str]:
+    """展示 Plan，等待用户确认。"""
+    messages = build_messages(history, user_message, ref_ids, folder_ids)
+    messages.append(
+        {
+            "role": "user",
+            "content": (
+                f"{agent_planner.presentation_hint(plan)}\n\n"
+                f"方案 JSON：\n```json\n{json.dumps(plan, ensure_ascii=False, indent=2)}\n```"
+            ),
+        }
+    )
+    full = ""
+    stream = await client.chat.completions.create(model=model, messages=messages, stream=True)
+    async for event in stream:
+        choice = event.choices[0] if event.choices else None
+        if not choice:
+            continue
+        piece = choice.delta.content or ""
+        if piece:
+            full += piece
+            yield f"data: {json.dumps({'delta': piece}, ensure_ascii=False)}\n\n"
+    if not full.strip():
+        full = "已生成变更方案；确认后可执行。"
+        yield f"data: {json.dumps({'delta': full}, ensure_ascii=False)}\n\n"
+    agent_memory.save_pending(thread_id, plan)
+    chat_store.append_turn(thread_id, user_message, full, None)
+    yield f"data: {json.dumps({'done': True}, ensure_ascii=False)}\n\n"
+
+
+async def _stream_query_tools(
+    client: AsyncOpenAI,
+    model: str,
+    thread_id: str,
+    user_message: str,
+    history: list[dict[str, Any]],
+    ref_ids: list[str],
+    folder_ids: list[str],
+) -> AsyncIterator[str]:
+    """Query 路径：只读工具循环。"""
+    messages = build_messages(history, user_message, ref_ids, folder_ids, query_mode=True)
+    tools = chat_tools.get_openai_tools(intent="query")
+    full = ""
+    tool_steps: list[dict[str, Any]] = []
+
+    for round_idx in range(_MAX_TOOL_ROUNDS):
+        response = await client.chat.completions.create(
+            model=model,
+            messages=messages,
+            tools=tools,
+            tool_choice=tool_choice_for_round("query", round_idx),
+            stream=False,
+        )
+        msg = response.choices[0].message
+        if not msg.tool_calls:
+            if msg.content:
+                full = msg.content
+            break
+
+        messages.append(msg.model_dump(exclude_none=True))
+        for tc in msg.tool_calls:
+            fn = tc.function
+            tool_name = fn.name or ""
+            try:
+                args = json.loads(fn.arguments or "{}")
+            except json.JSONDecodeError:
+                args = {}
+            args = _repair_tool_args(tool_name, args, messages, user_message)
+            yield f"data: {json.dumps({'tool_start': _tool_sse_start(tool_name)}, ensure_ascii=False)}\n\n"
+            result = chat_tools.execute(tool_name, args)
+            ok = _tool_ok(result)
+            preview = _tool_preview(result)
+            meta = _tool_step_dict(tool_name)
+            tool_steps.append({**meta, "ok": ok, "preview": preview, "status": "done"})
+            yield f"data: {json.dumps({'tool_end': {'name': tool_name, 'ok': ok, 'preview': preview}}, ensure_ascii=False)}\n\n"
+            messages.append({"role": "tool", "tool_call_id": tc.id, "content": result})
+
+    if not full.strip():
+        stream = await client.chat.completions.create(
+            model=model, messages=messages, tools=tools, tool_choice="none", stream=True
+        )
+        async for event in stream:
+            choice = event.choices[0] if event.choices else None
+            if not choice:
+                continue
+            piece = choice.delta.content or ""
+            if piece:
+                full += piece
+                yield f"data: {json.dumps({'delta': piece}, ensure_ascii=False)}\n\n"
+
+    if not full.strip():
+        full = "（模型未返回内容。）"
+        yield f"data: {json.dumps({'delta': full}, ensure_ascii=False)}\n\n"
+    chat_store.append_turn(thread_id, user_message, full, tool_steps or None)
+    yield f"data: {json.dumps({'done': True}, ensure_ascii=False)}\n\n"
+
+
+async def _stream_read(
+    client: AsyncOpenAI,
+    model: str,
+    thread_id: str,
+    user_message: str,
+    history: list[dict[str, Any]],
+    ref_ids: list[str],
+    folder_ids: list[str],
+) -> AsyncIterator[str]:
+    """Read 路径：纯对话，不调工具。"""
+    messages = build_messages(history, user_message, ref_ids, folder_ids)
+    full = ""
+    stream = await client.chat.completions.create(model=model, messages=messages, stream=True)
+    async for event in stream:
+        choice = event.choices[0] if event.choices else None
+        if not choice:
+            continue
+        piece = choice.delta.content or ""
+        if piece:
+            full += piece
+            yield f"data: {json.dumps({'delta': piece}, ensure_ascii=False)}\n\n"
+    if not full.strip():
+        full = "（模型未返回内容。）"
+        yield f"data: {json.dumps({'delta': full}, ensure_ascii=False)}\n\n"
+    chat_store.append_turn(thread_id, user_message, full, None)
     yield f"data: {json.dumps({'done': True}, ensure_ascii=False)}\n\n"
 
 
@@ -397,6 +531,9 @@ async def sse_chat_stream(
     reference_record_ids: list[str] | None = None,
     reference_folder_ids: list[str] | None = None,
 ) -> AsyncIterator[str]:
+    """
+    通用 Agent 流水线：Router → Planner → (Confirm?) → Executor → Summarize。
+    """
     user_message = (message or "").strip()
     if not user_message:
         yield f"data: {json.dumps({'error': '消息不能为空'}, ensure_ascii=False)}\n\n"
@@ -407,213 +544,84 @@ async def sse_chat_stream(
     try:
         history = chat_store.get_messages(thread_id)
         client, model = _llm_client()
+        mem = agent_memory.load(thread_id)
+        pending = mem.get("pending_plan")
 
-        if detect_confirmation(user_message):
-            pending = chat_store.get_pending_plan(thread_id) or build_move_plan_from_history(
-                history, user_message
-            )
-            if pending and pending.get("steps"):
-                async for chunk in _stream_pending_plan(
-                    client, model, thread_id, user_message, history, ref_ids, folder_ids, pending
-                ):
-                    yield chunk
-                return
-
-        hint = classify_plan_hint(ref_ids, folder_ids, history)
-        turn = await infer_turn_intent(
+        route = await agent_router.route(
             client,
             model,
             user_message,
             history,
+            pending_plan=pending if isinstance(pending, dict) else None,
+            awaiting_confirmation=mem.get("awaiting_confirmation", False),
             reference_record_ids=ref_ids,
             reference_folder_ids=folder_ids,
-            classify_hint=hint,
         )
-        messages = build_messages(history, user_message, ref_ids, folder_ids, turn=turn)
-        full = ""
-        tool_steps: list[dict[str, Any]] = []
-        pending_to_save: dict[str, Any] | None = None
 
-        # ponytail: 分类编排 — LLM 判 execute_tools，服务端执行 create/move
-        if turn.is_classify:
-            eff_ref_ids, eff_folder_ids = resolve_classify_refs(ref_ids, folder_ids, history)
-            plan = build_classify_plan(eff_ref_ids, eff_folder_ids, history)
-            actionable = plan_actionable_work(plan)
-
-            if turn.execute_tools:
-                steps, plan = apply_classify_plan(eff_ref_ids, eff_folder_ids, history)
-                for step in steps:
-                    name = step["name"]
-                    meta = _tool_step_dict(name)
-                    yield f"data: {json.dumps({'tool_start': _tool_sse_start(name)}, ensure_ascii=False)}\n\n"
-                    ok = bool(step.get("ok", True))
-                    preview = str(step.get("preview") or "")
-                    tool_steps.append({**meta, "ok": ok, "preview": preview, "status": "done"})
-                    yield f"data: {json.dumps({'tool_end': {'name': name, 'ok': ok, 'preview': preview}}, ensure_ascii=False)}\n\n"
-
-                summary = execution_summary(steps, plan)
-                messages.append(
-                    {
-                        "role": "user",
-                        "content": (
-                            f"系统已按预分析完成工具调用，结果 JSON：\n{summary}\n"
-                            f"跳过合集 {len(plan.get('skip_collection') or [])} 条，"
-                            f"未识别 {len(plan.get('skip_unknown') or [])} 条。"
-                            "请用 Markdown 简要汇报：新建了哪些文件夹、移动了多少条、哪些保留未分类。"
-                        ),
-                    }
-                )
-            else:
-                hint_msg = "请基于上方预分析输出分类方案（Markdown 表格），本轮不要调用任何工具。"
-                if not actionable["has_work"]:
-                    hint_msg += "当前引用范围内无需新建文件夹或移动笔记，请直接说明现状。"
-                else:
-                    hint_msg += "用户若确认执行，可回复要求落库。"
-                messages.append({"role": "user", "content": hint_msg})
-                pending_to_save = plan_from_classify_actionable(plan, actionable)
-
-            stream = await client.chat.completions.create(
-                model=model,
-                messages=messages,
-                stream=True,
+        if route.kind == "confirm":
+            plan = agent_planner.plan_for_confirm(
+                pending if isinstance(pending, dict) else None,
+                history,
+                user_message,
             )
-            async for event in stream:
-                choice = event.choices[0] if event.choices else None
-                if not choice:
-                    continue
-                piece = choice.delta.content or ""
-                if piece:
-                    full += piece
-                    yield f"data: {json.dumps({'delta': piece}, ensure_ascii=False)}\n\n"
-            if not full.strip():
-                if turn.execute_tools:
-                    full = "已完成分类工具调用。"
-                elif actionable["has_work"]:
-                    full = "已生成分类方案；确认后可要求执行落库。"
-                else:
-                    full = "当前引用范围内没有需要移动的笔记，分类已是最新状态。"
-                yield f"data: {json.dumps({'delta': full}, ensure_ascii=False)}\n\n"
-            if turn.execute_tools:
-                chat_store.set_pending_plan(thread_id, None)
-            else:
-                chat_store.set_pending_plan(thread_id, pending_to_save)
-            chat_store.append_turn(thread_id, user_message, full, tool_steps or None)
+            if plan and plan.get("steps"):
+                async for chunk in _stream_execute_plan(
+                    client, model, thread_id, user_message, history, ref_ids, folder_ids, plan
+                ):
+                    yield chunk
+                return
+            # 无 plan 时降级为 mutate 重新规划
+            route = RouteDecision(kind="mutate", mutate_goal="generic", auto_execute=True)
+
+        if route.kind == "cancel":
+            agent_memory.clear_pending(thread_id)
+            reply = "已取消待确认方案。"
+            chat_store.append_turn(thread_id, user_message, reply, None)
+            yield f"data: {json.dumps({'delta': reply}, ensure_ascii=False)}\n\n"
             yield f"data: {json.dumps({'done': True}, ensure_ascii=False)}\n\n"
             return
 
-        intent = turn.tool_intent
-        tools = chat_tools.get_openai_tools(intent=intent)
-
-        for round_idx in range(_MAX_TOOL_ROUNDS):
-            response = await client.chat.completions.create(
-                model=model,
-                messages=messages,
-                tools=tools,
-                tool_choice=tool_choice_for_round(intent, round_idx),
-                stream=False,
+        if route.is_mutate:
+            plan = await agent_planner.plan_mutate(
+                client,
+                model,
+                user_message,
+                history,
+                mutate_goal=route.mutate_goal,
+                auto_execute=route.auto_execute,
+                ref_ids=ref_ids,
+                folder_ids=folder_ids,
             )
-            msg = response.choices[0].message
+            if plan.get("requires_confirmation") and plan.get("steps"):
+                async for chunk in _stream_present_plan(
+                    client, model, thread_id, user_message, history, ref_ids, folder_ids, plan
+                ):
+                    yield chunk
+                return
+            if plan.get("steps"):
+                async for chunk in _stream_execute_plan(
+                    client, model, thread_id, user_message, history, ref_ids, folder_ids, plan
+                ):
+                    yield chunk
+                return
+            # 无步骤：展示 meta 说明
+            async for chunk in _stream_present_plan(
+                client, model, thread_id, user_message, history, ref_ids, folder_ids, plan
+            ):
+                yield chunk
+            return
 
-            if not msg.tool_calls:
-                if msg.content:
-                    full = msg.content
-                # ponytail: write 首轮未调工具则补编排 user 消息，促发 create/move
-                if intent == "write" and round_idx == 0 and turn.execute_tools:
-                    messages.append(
-                        {
-                            "role": "assistant",
-                            "content": full or "（未调用工具。）",
-                        }
-                    )
-                    messages.append(
-                        {
-                            "role": "user",
-                            "content": (
-                                "请按预分析清单调用工具完成笔记库变更："
-                                "先 list_folders，再 create_folder 补缺失文件夹，"
-                                "最后用 move_records 移动可单城笔记；合集笔记跳过。"
-                                "完成后简要汇报移动条数。"
-                            ),
-                        }
-                    )
-                    full = ""
-                    continue
-                break
+        if route.kind == "query":
+            async for chunk in _stream_query_tools(
+                client, model, thread_id, user_message, history, ref_ids, folder_ids
+            ):
+                yield chunk
+            return
 
-            messages.append(msg.model_dump(exclude_none=True))
-            round_get_record_missing = 0
-            round_get_record_total = 0
-            for tc in msg.tool_calls:
-                fn = tc.function
-                tool_name = fn.name or ""
-                try:
-                    args = json.loads(fn.arguments or "{}")
-                except json.JSONDecodeError:
-                    args = {}
-                args = _repair_tool_args(tool_name, args, messages, user_message)
+        async for chunk in _stream_read(
+            client, model, thread_id, user_message, history, ref_ids, folder_ids
+        ):
+            yield chunk
 
-                yield f"data: {json.dumps({'tool_start': _tool_sse_start(tool_name)}, ensure_ascii=False)}\n\n"
-
-                result = chat_tools.execute(tool_name, args)
-                ok = _tool_ok(result)
-                preview = _tool_preview(result)
-                if tool_name == "get_record":
-                    round_get_record_total += 1
-                    if not ok and "缺少" in preview:
-                        round_get_record_missing += 1
-                meta = _tool_step_dict(tool_name)
-                tool_steps.append({**meta, "ok": ok, "preview": preview, "status": "done"})
-                yield f"data: {json.dumps({'tool_end': {'name': tool_name, 'ok': ok, 'preview': preview}}, ensure_ascii=False)}\n\n"
-
-                messages.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": tc.id,
-                        "content": result,
-                    }
-                )
-
-            if round_get_record_total and round_get_record_missing == round_get_record_total:
-                messages.append(
-                    {
-                        "role": "user",
-                        "content": (
-                            "get_record 必须传 id 或 ids（来自 list_records.records[].id）。"
-                            "批量读正文请用 list_records(folder_name=\"未分类\", include_text=true)。"
-                        ),
-                    }
-                )
-
-        if not full.strip():
-            stream = await client.chat.completions.create(
-                model=model,
-                messages=messages,
-                tools=tools,
-                tool_choice="none",
-                stream=True,
-            )
-            async for event in stream:
-                choice = event.choices[0] if event.choices else None
-                if not choice:
-                    continue
-                piece = choice.delta.content or ""
-                if piece:
-                    full += piece
-                    yield f"data: {json.dumps({'delta': piece}, ensure_ascii=False)}\n\n"
-        elif full.strip():
-            chunk_size = 48
-            for i in range(0, len(full), chunk_size):
-                piece = full[i : i + chunk_size]
-                yield f"data: {json.dumps({'delta': piece}, ensure_ascii=False)}\n\n"
-
-        if not full.strip():
-            full = "（模型未返回内容；若需操作笔记库，请确认模型支持 function calling。）"
-            yield f"data: {json.dumps({'delta': full}, ensure_ascii=False)}\n\n"
-
-        offer = offer_move_plan_from_assistant(full)
-        chat_store.append_turn(thread_id, user_message, full, tool_steps or None)
-        if offer:
-            chat_store.set_pending_plan(thread_id, offer)
-        yield f"data: {json.dumps({'done': True}, ensure_ascii=False)}\n\n"
     except Exception as err:  # noqa: BLE001
         yield f"data: {json.dumps({'error': str(err)}, ensure_ascii=False)}\n\n"
