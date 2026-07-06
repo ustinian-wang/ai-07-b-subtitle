@@ -15,8 +15,15 @@ from app.models.schemas import (
 )
 from app.services import chat_store
 from app.services.chat_stream import sse_chat_stream
+from app.services.chat_tools_catalog import get_tools_catalog
 
 router = APIRouter(prefix="/api/v1/chat", tags=["chat"])
+
+
+@router.get("/tools")
+def list_chat_tools() -> dict:
+    """对话助手可用工具（按操作分类）。"""
+    return get_tools_catalog()
 
 
 @router.get("/sessions", response_model=ChatSessionsListResponse)

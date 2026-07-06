@@ -86,6 +86,18 @@
           </template>
         </div>
       </article>
+      <article v-if="streaming && toolSteps.length" class="chat-msg chat-msg--assistant chat-msg--tools">
+        <div class="chat-role">工具</div>
+        <div class="chat-bubble chat-bubble--tools">
+          <p v-for="(step, i) in toolSteps" :key="`${step.name}-${i}`" class="tool-step">
+            <span class="tool-step-cat">{{ step.categoryLabel }}</span>
+            {{ step.label }}
+            <span v-if="step.status === 'running'" class="tool-step-status">执行中…</span>
+            <span v-else-if="step.ok" class="tool-step-status ok">✓ {{ step.preview }}</span>
+            <span v-else class="tool-step-status err">✗ {{ step.preview }}</span>
+          </p>
+        </div>
+      </article>
       <article v-if="streaming" class="chat-msg chat-msg--assistant">
         <div class="chat-role">助手</div>
         <div class="chat-bubble chat-bubble--stream">
@@ -221,6 +233,7 @@ export default {
       dropDepth: 0,
       refHint: '',
       mention: { active: false, query: '', start: 0, index: 0 },
+      toolSteps: [],
     };
   },
   computed: {
@@ -598,6 +611,7 @@ export default {
       this.busy = true;
       this.streaming = true;
       this.streamBuffer = '';
+      this.toolSteps = [];
       this.chatError = '';
       this.closeMention();
       this.messages.push({ role: 'user', content: text });
@@ -640,6 +654,28 @@ export default {
             if (!line.startsWith('data: ')) continue;
             const payload = JSON.parse(line.slice(6));
             if (payload.error) throw new Error(payload.error);
+            if (payload.tool_start) {
+              const ts = payload.tool_start;
+              this.toolSteps.push({
+                name: ts.name,
+                label: ts.label || ts.name,
+                categoryLabel: ts.category_label || ts.category || '',
+                status: 'running',
+                ok: true,
+                preview: '',
+              });
+              this.scrollToBottom();
+            }
+            if (payload.tool_end) {
+              const te = payload.tool_end;
+              const step = [...this.toolSteps].reverse().find((s) => s.name === te.name && s.status === 'running');
+              if (step) {
+                step.status = 'done';
+                step.ok = !!te.ok;
+                step.preview = te.preview || '';
+              }
+              this.scrollToBottom();
+            }
             if (payload.delta) {
               this.streamBuffer += payload.delta;
               this.scrollToBottom();
@@ -647,6 +683,7 @@ export default {
             if (payload.done) {
               this.messages.push({ role: 'assistant', content: this.streamBuffer });
               this.streamBuffer = '';
+              this.toolSteps = [];
               this.streaming = false;
               this.loadSessions();
             }
@@ -660,6 +697,7 @@ export default {
         this.busy = false;
         this.streaming = false;
         this.streamBuffer = '';
+        this.toolSteps = [];
         this.$nextTick(this.scrollToBottom);
       }
     },
@@ -828,6 +866,35 @@ export default {
 }
 .chat-bubble--stream {
   opacity: 0.95;
+}
+.chat-bubble--tools {
+  font-size: 0.82rem;
+  color: #9aa8d8;
+}
+.tool-step {
+  margin: 0 0 6px;
+}
+.tool-step:last-child {
+  margin-bottom: 0;
+}
+.tool-step-cat {
+  display: inline-block;
+  margin-right: 6px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: #1a2040;
+  color: #8ea4ff;
+  font-size: 0.75rem;
+}
+.tool-step-status {
+  margin-left: 6px;
+  color: #8892b8;
+}
+.tool-step-status.ok {
+  color: #7ddea2;
+}
+.tool-step-status.err {
+  color: #ff8a8a;
 }
 .chat-text {
   white-space: pre-wrap;

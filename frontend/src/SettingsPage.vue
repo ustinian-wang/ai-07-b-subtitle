@@ -101,6 +101,25 @@
         <span v-if="tip" :class="['tip', tipOk ? 'ok' : 'err']">{{ tip }}</span>
       </div>
     </section>
+
+    <section class="panel">
+      <h2 class="section-title">对话助手工具</h2>
+      <p class="hint">模型可通过以下工具操作本地笔记库，按分类组织。</p>
+      <p v-if="toolsLoading" class="status">加载工具目录…</p>
+      <div v-else-if="toolCategories.length" class="tool-catalog">
+        <div v-for="cat in toolCategories" :key="cat.id" class="tool-category">
+          <h3 class="tool-category-title">{{ cat.label }}（{{ cat.count }}）</h3>
+          <ul class="tool-list">
+            <li v-for="t in cat.tools" :key="t.name" class="tool-item">
+              <code class="tool-name">{{ t.name }}</code>
+              <span class="tool-label">{{ t.label }}</span>
+              <p class="tool-desc">{{ t.description }}</p>
+            </li>
+          </ul>
+        </div>
+      </div>
+      <p v-else class="status warn">暂无工具定义</p>
+    </section>
   </div>
 </template>
 
@@ -124,10 +143,13 @@ export default {
       saving: false,
       tip: '',
       tipOk: true,
+      toolsLoading: false,
+      toolCategories: [],
     };
   },
   mounted() {
     this.load();
+    this.loadTools();
   },
   methods: {
     async parseJsonResponse(resp) {
@@ -163,6 +185,20 @@ export default {
         this.openaiModel = data.openai_model || 'gpt-4o-mini';
       } catch {
         /* ignore */
+      }
+    },
+    async loadTools() {
+      this.toolsLoading = true;
+      try {
+        const resp = await fetch('/api/v1/chat/tools');
+        const data = await this.parseJsonResponse(resp);
+        if (resp.ok) {
+          this.toolCategories = data.categories || [];
+        }
+      } catch {
+        this.toolCategories = [];
+      } finally {
+        this.toolsLoading = false;
       }
     },
     async save() {
@@ -322,5 +358,46 @@ export default {
 .tip.err {
   color: #ff8a8a;
   font-size: 0.88rem;
+}
+.tool-catalog {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.tool-category-title {
+  margin: 0 0 8px;
+  font-size: 0.95rem;
+  color: #c8d0f0;
+}
+.tool-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.tool-item {
+  padding: 10px 0;
+  border-bottom: 1px solid #252b48;
+}
+.tool-item:last-child {
+  border-bottom: none;
+}
+.tool-name {
+  display: inline-block;
+  margin-right: 8px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: #1a2040;
+  color: #9eb4ff;
+  font-size: 0.82rem;
+}
+.tool-label {
+  color: #e8ecff;
+  font-size: 0.9rem;
+}
+.tool-desc {
+  margin: 6px 0 0;
+  color: #8892b8;
+  font-size: 0.85rem;
+  line-height: 1.45;
 }
 </style>
