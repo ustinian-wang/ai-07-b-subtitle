@@ -11,6 +11,8 @@ from app.services.folder_store import (
     create_folder,
     is_uncategorized_folder_id,
     list_user_folders,
+    normalize_folder_id,
+    user_folder_ids,
 )
 from app.services.subtitle_store import get_record, list_record_ids_in_folder, move_records_to_folder
 
@@ -48,6 +50,8 @@ _COLLECTION_HINTS = (
     "一样精彩",
 )
 _MULTI_CITY_SEP = re.compile(r"[、，,/＋+与和及]")
+_MENTION_RECORD = re.compile(r"\]\(([a-f0-9]{10,12})\)")
+_MENTION_FOLDER = re.compile(r"\]\(folder:([^)]+)\)")
 
 
 def _title_of(rec: dict[str, Any]) -> str:
@@ -119,14 +123,85 @@ def collect_record_ids(
     return ordered
 
 
+def collect_refs_from_history(
+    history: list[dict[str, str]],
+    reference_record_ids: list[str] | None = None,
+    reference_folder_ids: list[str] | None = None,
+) -> tuple[list[str], list[str]]:
+    """合并当前引用与会话历史里 @mention 的笔记/文件夹。"""
+    ref_ids = [x for x in (reference_record_ids or []) if x]
+    folder_ids = [x for x in (reference_folder_ids or []) if x]
+    seen_r: set[str] = set(ref_ids)
+    seen_f: set[str] = set(folder_ids)
+    for msg in history:
+        if msg.get("role") != "user":
+            continue
+        text = msg.get("content") or ""
+        for rid in _MENTION_RECORD.findall(text):
+            if rid not in seen_r:
+                seen_r.add(rid)
+                ref_ids.append(rid)
+        for fid in _MENTION_FOLDER.findall(text):
+            if fid not in seen_f:
+                seen_f.add(fid)
+                folder_ids.append(fid)
+    return ref_ids, folder_ids
+
+
+def resolve_classify_refs(
+    reference_record_ids: list[str] | None,
+    reference_folder_ids: list[str] | None,
+    history: list[dict[str, str]] | None = None,
+) -> tuple[list[str], list[str]]:
+    """合并历史 @mention；若仍无引用则默认扫描未分类。"""
+    ref_ids, folder_ids = collect_refs_from_history(
+        history or [],
+        reference_record_ids,
+        reference_folder_ids,
+    )
+    if not ref_ids and not folder_ids:
+        folder_ids = [UNCATEGORIZED_FOLDER_ID]
+    return ref_ids, folder_ids
+
+
+def plan_actionable_work(plan: dict[str, Any]) -> dict[str, Any]:
+    """过滤已在目标文件夹的笔记，判断是否真的需要 create/move。"""
+    name_to_id = _folder_name_index()
+    valid = user_folder_ids()
+    pending_moves: list[dict[str, Any]] = []
+    folders_to_create: list[str] = []
+
+    for fname in plan.get("folders_to_create") or []:
+        if fname.lower() not in name_to_id:
+            folders_to_create.append(fname)
+
+    for item in plan.get("movable") or []:
+        fname = item["suggested_folder_name"]
+        fid = item.get("existing_folder_id") or name_to_id.get(fname.lower())
+        if not fid:
+            pending_moves.append(item)
+            continue
+        rec = get_record(item["record_id"])
+        if not rec:
+            continue
+        current = normalize_folder_id(rec.get("folder_id"), valid)
+        if current != fid:
+            pending_moves.append(item)
+
+    return {
+        "has_work": bool(pending_moves or folders_to_create),
+        "pending_moves": pending_moves,
+        "folders_to_create": folders_to_create,
+    }
+
+
 def build_classify_plan(
     reference_record_ids: list[str] | None = None,
     reference_folder_ids: list[str] | None = None,
+    history: list[dict[str, str]] | None = None,
 ) -> dict[str, Any]:
-    record_ids = collect_record_ids(
-        [x for x in (reference_record_ids or []) if x],
-        [x for x in (reference_folder_ids or []) if x],
-    )
+    ref_ids, folder_ids = resolve_classify_refs(reference_record_ids, reference_folder_ids, history)
+    record_ids = collect_record_ids(ref_ids, folder_ids)
     name_to_id = _folder_name_index()
     movable: list[dict[str, Any]] = []
     skip_collection: list[dict[str, Any]] = []
@@ -170,9 +245,10 @@ def build_classify_plan(
 def build_classify_plan_block(
     reference_record_ids: list[str] | None = None,
     reference_folder_ids: list[str] | None = None,
+    history: list[dict[str, str]] | None = None,
 ) -> str:
     """mutate 时注入 system，指导模型按清单调工具。"""
-    plan = build_classify_plan(reference_record_ids, reference_folder_ids)
+    plan = build_classify_plan(reference_record_ids, reference_folder_ids, history)
     if plan["total_scanned"] == 0:
         return ""
 
@@ -191,7 +267,8 @@ def build_classify_plan_block(
 
     lines.append("")
     lines.append("执行顺序：1) list_folders 核对 2) create_folder 补缺失 3) move_records 逐批移动。")
-    lines.append("禁止调用 list_records / get_record；record_id 与目标文件夹已在下方清单，无需读正文。")
+    lines.append("若用户仅要方案（如「重新分类」），只输出建议、勿写库；确认执行后再调用工具。")
+    lines.append("禁止调用 list_records / get_record；record_id 与目标文件夹已在下方清单。")
     lines.append("合集/多城笔记不要 move；可保留未分类或询问用户是否建「合集」文件夹。")
     lines.append("")
     lines.append("可移动清单（JSON）：")
@@ -210,12 +287,14 @@ def build_classify_plan_block(
 def apply_classify_plan(
     reference_record_ids: list[str] | None = None,
     reference_folder_ids: list[str] | None = None,
+    history: list[dict[str, str]] | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """
     服务端执行分类变更，返回 (tool_steps, plan)。
-    每步：{name, ok, preview, result}
+    仅处理 plan_actionable_work 判定为必要的 create/move。
     """
-    plan = build_classify_plan(reference_record_ids, reference_folder_ids)
+    plan = build_classify_plan(reference_record_ids, reference_folder_ids, history)
+    actionable = plan_actionable_work(plan)
     steps: list[dict[str, Any]] = []
     name_to_id = _folder_name_index()
 
@@ -233,7 +312,10 @@ def apply_classify_plan(
         }
     )
 
-    for fname in plan["folders_to_create"]:
+    if not actionable["has_work"]:
+        return steps, plan
+
+    for fname in actionable["folders_to_create"]:
         if fname.lower() in name_to_id:
             continue
         try:
@@ -260,7 +342,7 @@ def apply_classify_plan(
             )
 
     groups: dict[str, list[str]] = defaultdict(list)
-    for item in plan["movable"]:
+    for item in actionable["pending_moves"]:
         fname = item["suggested_folder_name"]
         fid = item.get("existing_folder_id") or name_to_id.get(fname.lower())
         if fid:

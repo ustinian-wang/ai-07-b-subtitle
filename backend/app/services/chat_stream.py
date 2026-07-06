@@ -11,10 +11,19 @@ from openai import AsyncOpenAI
 from app.services import chat_store, chat_tools, settings_store
 from app.services.chat_classify_plan import (
     apply_classify_plan,
+    build_classify_plan,
     build_classify_plan_block,
     execution_summary,
+    plan_actionable_work,
+    resolve_classify_refs,
 )
-from app.services.chat_intent import classify_turn, is_classify_mutate_turn, tool_choice_for_round
+from app.services.chat_intent import (
+    classify_turn,
+    is_classify_action,
+    is_classify_mutate_turn,
+    should_execute_classify_tools,
+    tool_choice_for_round,
+)
 from app.services.subtitle_store import get_record, infer_source, list_record_ids_in_folder
 from app.services.folder_store import get_folder, is_uncategorized_folder_id
 
@@ -145,15 +154,31 @@ def build_messages(
     *,
     intent: str = "read",
 ) -> list[dict[str, Any]]:
-    ref_block = _build_reference_block(reference_record_ids)
+    ref_ids = [x for x in reference_record_ids if x]
+    folder_ids = [x for x in (reference_folder_ids or []) if x]
+    eff_ref_ids, eff_folder_ids = ref_ids, folder_ids
+    if intent == "write" and is_classify_action(
+        user_message,
+        history,
+        reference_folder_ids=folder_ids,
+        reference_record_ids=ref_ids,
+    ):
+        eff_ref_ids, eff_folder_ids = resolve_classify_refs(ref_ids, folder_ids, history)
+
+    ref_block = _build_reference_block(ref_ids)
     folder_block = _build_folder_reference_block(
-        [x for x in (reference_folder_ids or []) if x],
+        eff_folder_ids if intent == "write" else folder_ids,
         summary_only=(intent == "write"),
     )
     system = SYSTEM_PROMPT
     blocks = [b for b in (ref_block, folder_block) if b]
-    if intent == "write":
-        plan_block = build_classify_plan_block(reference_record_ids, reference_folder_ids or [])
+    if intent == "write" and is_classify_action(
+        user_message,
+        history,
+        reference_folder_ids=folder_ids,
+        reference_record_ids=ref_ids,
+    ):
+        plan_block = build_classify_plan_block(eff_ref_ids, eff_folder_ids, history)
         if plan_block:
             blocks.append(plan_block)
     if blocks:
@@ -219,31 +244,46 @@ async def sse_chat_stream(
         client, model = _llm_client()
         full = ""
 
-        # ponytail: 自动分类由服务端按预分析执行，不让 LLM 并行调 get_record/create_folder
+        # ponytail: 分类编排 — 先判是否有必要写库，再决定是否调工具
         if is_classify_mutate_turn(
             user_message,
             history,
             reference_folder_ids=folder_ids,
             reference_record_ids=ref_ids,
         ):
-            steps, plan = apply_classify_plan(ref_ids, folder_ids)
-            for step in steps:
-                name = step["name"]
-                yield f"data: {json.dumps({'tool_start': {'name': name, 'label': chat_tools.tool_label(name), 'category': chat_tools.tool_category(name), 'category_label': chat_tools.TOOL_CATEGORIES.get(chat_tools.tool_category(name), {}).get('label', '')}}, ensure_ascii=False)}\n\n"
-                yield f"data: {json.dumps({'tool_end': {'name': name, 'ok': step.get('ok', True), 'preview': step.get('preview', '')}}, ensure_ascii=False)}\n\n"
+            eff_ref_ids, eff_folder_ids = resolve_classify_refs(ref_ids, folder_ids, history)
+            plan = build_classify_plan(eff_ref_ids, eff_folder_ids, history)
+            actionable = plan_actionable_work(plan)
 
-            summary = execution_summary(steps, plan)
-            messages.append(
-                {
-                    "role": "user",
-                    "content": (
-                        f"系统已按预分析完成工具调用，结果 JSON：\n{summary}\n"
-                        f"跳过合集 {len(plan.get('skip_collection') or [])} 条，"
-                        f"未识别 {len(plan.get('skip_unknown') or [])} 条。"
-                        "请用 Markdown 简要汇报：新建了哪些文件夹、移动了多少条、哪些保留未分类。"
-                    ),
-                }
-            )
+            if should_execute_classify_tools(plan, user_message, history):
+                steps, plan = apply_classify_plan(eff_ref_ids, eff_folder_ids, history)
+                for step in steps:
+                    name = step["name"]
+                    yield f"data: {json.dumps({'tool_start': {'name': name, 'label': chat_tools.tool_label(name), 'category': chat_tools.tool_category(name), 'category_label': chat_tools.TOOL_CATEGORIES.get(chat_tools.tool_category(name), {}).get('label', '')}}, ensure_ascii=False)}\n\n"
+                    yield f"data: {json.dumps({'tool_end': {'name': name, 'ok': step.get('ok', True), 'preview': step.get('preview', '')}}, ensure_ascii=False)}\n\n"
+
+                summary = execution_summary(steps, plan)
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": (
+                            f"系统已按预分析完成工具调用，结果 JSON：\n{summary}\n"
+                            f"跳过合集 {len(plan.get('skip_collection') or [])} 条，"
+                            f"未识别 {len(plan.get('skip_unknown') or [])} 条。"
+                            "请用 Markdown 简要汇报：新建了哪些文件夹、移动了多少条、哪些保留未分类。"
+                        ),
+                    }
+                )
+            else:
+                hint = (
+                    "请基于上方预分析输出分类方案（Markdown 表格），本轮不要调用任何工具。"
+                )
+                if not actionable["has_work"]:
+                    hint += "当前引用范围内无需新建文件夹或移动笔记（可能已在目标分类），请直接说明现状。"
+                else:
+                    hint += "若用户确认执行，可说「按此执行」或「自动分类」。"
+                messages.append({"role": "user", "content": hint})
+
             stream = await client.chat.completions.create(
                 model=model,
                 messages=messages,
@@ -258,7 +298,10 @@ async def sse_chat_stream(
                     full += piece
                     yield f"data: {json.dumps({'delta': piece}, ensure_ascii=False)}\n\n"
             if not full.strip():
-                full = f"已完成自动分类：{summary}"
+                if actionable["has_work"]:
+                    full = "已生成分类方案；确认后回复「按此执行」即可落库。"
+                else:
+                    full = "当前引用范围内没有需要移动的笔记，分类已是最新状态。"
                 yield f"data: {json.dumps({'delta': full}, ensure_ascii=False)}\n\n"
             chat_store.append_exchange(thread_id, user_message, full)
             yield f"data: {json.dumps({'done': True}, ensure_ascii=False)}\n\n"

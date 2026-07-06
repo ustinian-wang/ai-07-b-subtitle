@@ -38,6 +38,25 @@ _ASSISTANT_CLASSIFY = re.compile(
     re.I,
 )
 
+# 明确要写库执行（非仅出方案）
+_EXECUTE_CLASSIFY = re.compile(
+    r"(自动分类|执行分类|开始整理|开始分|落库|帮我移|按此执行|按此)",
+    re.I,
+)
+
+# 仅要方案、暂不写库
+_PLAN_ONLY_CLASSIFY = re.compile(
+    r"(重新分类|重新分配|调整.*分类|怎么分|如何分|建议.*分类)",
+    re.I,
+)
+
+# 走服务端自动分类（非「移动到某文件夹」等单条操作）
+_CLASSIFY_ACTION = re.compile(
+    r"(自动分类|按城市|按地区|重新分类|重新分配|调整.*分类|对笔记.*分类|"
+    r"归类|整理笔记|帮我分|执行分类|开始分|开始整理)",
+    re.I,
+)
+
 
 def _last_assistant_text(history: list[dict[str, str]]) -> str:
     for m in reversed(history):
@@ -88,6 +107,67 @@ def classify_turn(
     return "read"
 
 
+def is_classify_action(
+    user_message: str,
+    history: list[dict[str, str]],
+    *,
+    reference_folder_ids: list[str] | None = None,
+    reference_record_ids: list[str] | None = None,
+) -> bool:
+    """是否为批量分类/重新分类（非单条移动、删除等）。"""
+    from app.services.chat_classify_plan import collect_refs_from_history
+
+    t = (user_message or "").strip()
+    hist_refs, _ = collect_refs_from_history(history, reference_record_ids, reference_folder_ids)
+    has_refs = bool(hist_refs or reference_folder_ids or reference_record_ids)
+    last_assistant = _last_assistant_text(history)
+
+    if _CLASSIFY_ACTION.search(t):
+        return True
+    if has_refs and _CLASSIFY_SCOPE.search(t) and not _READ_ONLY.search(t):
+        return True
+    if history and (_CLASSIFY_CONTINUE.match(t) or re.search(r"(搞下|按此|落库|执行)", t, re.I)):
+        if _ASSISTANT_CLASSIFY.search(last_assistant):
+            return True
+    return False
+
+
+def should_execute_classify_tools(
+    plan: dict,
+    user_message: str,
+    history: list[dict[str, str]],
+) -> bool:
+    """
+    判断是否真的要调工具写库。
+    - 无实质变更（已在目标文件夹）→ 否
+    - 「重新分类」等仅要方案 → 否
+    - 「自动分类」/确认执行 → 是
+    """
+    from app.services.chat_classify_plan import plan_actionable_work
+
+    actionable = plan_actionable_work(plan)
+    if not actionable["has_work"]:
+        return False
+
+    t = (user_message or "").strip()
+    last_assistant = _last_assistant_text(history)
+
+    if _EXECUTE_CLASSIFY.search(t):
+        return True
+    if _CLASSIFY_CONTINUE.match(t):
+        return True
+    if _CONFIRM.match(t) and history and _ASSISTANT_CLASSIFY.search(last_assistant):
+        return True
+    if history and _ASSISTANT_CLASSIFY.search(last_assistant):
+        if re.search(r"(搞下|按此|落库|执行)", t, re.I):
+            return True
+
+    if _PLAN_ONLY_CLASSIFY.search(t) and not _EXECUTE_CLASSIFY.search(t):
+        return False
+
+    return False
+
+
 def is_classify_mutate_turn(
     user_message: str,
     history: list[dict[str, str]],
@@ -95,7 +175,7 @@ def is_classify_mutate_turn(
     reference_folder_ids: list[str] | None = None,
     reference_record_ids: list[str] | None = None,
 ) -> bool:
-    """是否走服务端自动分类（不交给 LLM 调 create/move/get_record）。"""
+    """是否进入分类编排分支（注入预分析；是否写库见 should_execute_classify_tools）。"""
     if classify_turn(
         user_message,
         history,
@@ -103,10 +183,12 @@ def is_classify_mutate_turn(
         reference_record_ids=reference_record_ids,
     ) != "write":
         return False
-    from app.services.chat_classify_plan import build_classify_plan
-
-    plan = build_classify_plan(reference_record_ids, reference_folder_ids)
-    return plan["total_scanned"] > 0
+    return is_classify_action(
+        user_message,
+        history,
+        reference_folder_ids=reference_folder_ids,
+        reference_record_ids=reference_record_ids,
+    )
 
 
 def tool_choice_for_round(intent: str, round_idx: int) -> str | dict[str, object]:
@@ -143,6 +225,13 @@ def _self_check() -> None:
     assert is_classify_mutate_turn(
         "帮我把笔记按城市自动分类", [], reference_folder_ids=["__uncategorized__"]
     )
+    assert is_classify_mutate_turn("重新分类", [])
+    assert not is_classify_mutate_turn("移动到首尔文件夹", [])
+    from app.services.chat_classify_plan import build_classify_plan, plan_actionable_work
+
+    plan = build_classify_plan([], ["__uncategorized__"])
+    assert not should_execute_classify_tools(plan, "重新分类", [])
+    assert should_execute_classify_tools(plan, "帮我把笔记按城市自动分类", []) or not plan_actionable_work(plan)["has_work"]
     assert tool_choice_for_round("write", 0) == {"type": "function", "function": {"name": "list_folders"}}
 
 
