@@ -1,0 +1,36 @@
+backend/app/services/chat_stream.py
+  s_736c93b51a67e7::t_334679a02eeaab 31-32
+  s_736c93b51a67e7::t_a20faee4d50ccc 146-244
+  s_736c93b51a67e7::t_8f7e611597e191 476
+  s_736c93b51a67e7::t_44f5aa73baf6f3 483-486
+  s_736c93b51a67e7::t_10cb1533303db8 499-509
+  s_736c93b51a67e7::t_567e2bccf10f9e 467-468
+  s_736c93b51a67e7::t_e06398fdd21619 270-273
+  s_736c93b51a67e7::t_c3e0421c01668b 5
+backend/app/services/chat_tools.py
+  s_736c93b51a67e7::t_613a0e3ed0275b 128,133-144,157,161-166
+  s_736c93b51a67e7::t_fbee33fe6665ef 62-71
+  s_736c93b51a67e7::t_4fad2f6c037815 26
+  s_736c93b51a67e7::t_8dd1950ba66fbd 300-305,309,311-328,332-344,349-388
+  s_736c93b51a67e7::t_d8c6638405df6b 568-570
+  s_736c93b51a67e7::t_4c49b5b0e183f5 9,14
+  s_736c93b51a67e7::t_cbdb2740a2ee7d 566-567,571-572
+  s_736c93b51a67e7::t_60508effcd4746 92-94
+  s_736c93b51a67e7::t_7bc5e5d6573be3 109-110
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "4d68cb54e386d24fc29622be7133012ae6bf49d4",
+  "prompts": {},
+  "sessions": {
+    "s_736c93b51a67e7": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "d38e583a-0c3d-4908-afcb-77ee91a8bf78",
+        "model": "default"
+      },
+      "human_author": "jser <87244899@qq.com>"
+    }
+  }
+}
