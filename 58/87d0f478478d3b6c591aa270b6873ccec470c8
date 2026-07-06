@@ -1,0 +1,26 @@
+ecosystem.config.cjs
+  s_736c93b51a67e7::t_62de5dc7c23184 1-25
+frontend/package.json
+  s_736c93b51a67e7::t_d41a12f463865b 8
+README.md
+  s_736c93b51a67e7::t_cbae5abf76b9f7 41
+  s_736c93b51a67e7::t_236d87d8d9738d 19
+  s_736c93b51a67e7::t_a34c2b3e8b859a 47,51-56
+  s_736c93b51a67e7::t_85ed0d89784ec5 77
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "5887d0f478478d3b6c591aa270b6873ccec470c8",
+  "prompts": {},
+  "sessions": {
+    "s_736c93b51a67e7": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "d38e583a-0c3d-4908-afcb-77ee91a8bf78",
+        "model": "default"
+      },
+      "human_author": "jser <87244899@qq.com>"
+    }
+  }
+}
