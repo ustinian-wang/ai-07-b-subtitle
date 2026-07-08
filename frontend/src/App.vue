@@ -242,6 +242,7 @@
       :selected-ids="selectedIds"
       :record-map="recordMap"
       :all-records="allRecords"
+      :all-folders="allFolders"
       @open-record="openRecord"
     />
     </div>
@@ -367,6 +368,31 @@ export default {
       };
       walk(this.tree.folders);
       collect(this.tree.uncategorized);
+      return out;
+    },
+    allFolders() {
+      const out = [];
+      const walk = (folders, path = '') => {
+        for (const f of folders || []) {
+          const label = path ? `${path} / ${f.name}` : f.name;
+          out.push({
+            type: 'folder',
+            folderId: f.id,
+            name: f.name,
+            recordCount: this.folderRecordCount(f),
+            path: label,
+          });
+          walk(f.children, label);
+        }
+      };
+      walk(this.tree.folders);
+      out.unshift({
+        type: 'folder',
+        folderId: '__uncategorized__',
+        name: '未分类',
+        recordCount: (this.tree.uncategorized || []).length,
+        path: '未分类',
+      });
       return out;
     },
   },

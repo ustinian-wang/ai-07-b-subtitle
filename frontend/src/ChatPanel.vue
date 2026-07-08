@@ -65,7 +65,17 @@
           m.role === 'user' ? 'chat-msg--user' : m.role === 'tools' ? 'chat-msg--tools' : 'chat-msg--assistant',
         ]"
       >
-        <div class="chat-role">{{ messageRoleLabel(m) }}</div>
+        <div class="chat-msg-bar">
+          <div class="chat-role">{{ messageRoleLabel(m) }}</div>
+          <button
+            type="button"
+            class="chat-msg-copy"
+            title="复制消息"
+            @click="copyMessage(m, idx)"
+          >
+            {{ copyHintKey === copyKey(m, idx) ? '已复制' : '复制' }}
+          </button>
+        </div>
         <div v-if="m.role === 'tools'" class="chat-bubble chat-bubble--tools">
           <p v-for="(step, i) in m.steps || []" :key="`${step.name}-${i}`" class="tool-step">
             <span class="tool-step-cat">{{ step.category_label || step.categoryLabel }}</span>
@@ -76,35 +86,13 @@
           </p>
         </div>
         <div v-else class="chat-bubble">
-          <template v-for="(seg, si) in parseMessageContent(m.content)" :key="`${idx}-${si}`">
-            <span v-if="seg.type === 'text'" class="chat-text">{{ seg.text }}</span>
-            <button
-              v-else-if="seg.type === 'ref'"
-              type="button"
-              class="msg-ref"
-              :title="`打开笔记：${seg.displayTitle}`"
-              @click="onRefClick(seg.id)"
-            >
-              <span
-                :class="[
-                  'ref-source',
-                  seg.source === 'xiaohongshu' ? 'ref-source--xhs' : 'ref-source--bili',
-                ]"
-              >
-                {{ seg.source === 'xiaohongshu' ? '小红书' : 'B站' }}
-              </span>
-              <span class="ref-title">{{ seg.displayTitle }}</span>
-            </button>
-            <span v-else-if="seg.type === 'folder-ref'" class="msg-ref msg-ref--folder">
-              <span class="ref-folder-icon">📂</span>
-              <span class="ref-folder-label">分类</span>
-              <span class="ref-title">{{ seg.displayName }}</span>
-            </span>
-          </template>
+          <ChatMessageBody :content="m.content" :record-map="recordMap" @open-record="onRefClick" />
         </div>
       </article>
       <article v-if="streaming && toolSteps.length" class="chat-msg chat-msg--assistant chat-msg--tools">
-        <div class="chat-role">工具</div>
+        <div class="chat-msg-bar">
+          <div class="chat-role">工具</div>
+        </div>
         <div class="chat-bubble chat-bubble--tools">
           <p v-for="(step, i) in toolSteps" :key="`${step.name}-${i}`" class="tool-step">
             <span class="tool-step-cat">{{ step.categoryLabel }}</span>
@@ -116,35 +104,25 @@
         </div>
       </article>
       <article v-if="streaming" class="chat-msg chat-msg--assistant">
-        <div class="chat-role">助手</div>
+        <div class="chat-msg-bar">
+          <div class="chat-role">助手</div>
+          <button
+            v-if="streamBuffer"
+            type="button"
+            class="chat-msg-copy"
+            title="复制消息"
+            @click="copyText(streamBuffer, 'stream')"
+          >
+            {{ copyHintKey === 'stream' ? '已复制' : '复制' }}
+          </button>
+        </div>
         <div class="chat-bubble chat-bubble--stream">
-          <template v-if="streamBuffer">
-            <template v-for="(seg, si) in parseMessageContent(streamBuffer)" :key="`stream-${si}`">
-              <span v-if="seg.type === 'text'" class="chat-text">{{ seg.text }}</span>
-              <button
-                v-else-if="seg.type === 'ref'"
-                type="button"
-                class="msg-ref"
-                :title="`打开笔记：${seg.displayTitle}`"
-                @click="onRefClick(seg.id)"
-              >
-                <span
-                  :class="[
-                    'ref-source',
-                    seg.source === 'xiaohongshu' ? 'ref-source--xhs' : 'ref-source--bili',
-                  ]"
-                >
-                  {{ seg.source === 'xiaohongshu' ? '小红书' : 'B站' }}
-                </span>
-                <span class="ref-title">{{ seg.displayTitle }}</span>
-              </button>
-              <span v-else-if="seg.type === 'folder-ref'" class="msg-ref msg-ref--folder">
-                <span class="ref-folder-icon">📂</span>
-                <span class="ref-folder-label">分类</span>
-                <span class="ref-title">{{ seg.displayName }}</span>
-              </span>
-            </template>
-          </template>
+          <ChatMessageBody
+            v-if="streamBuffer"
+            :content="streamBuffer"
+            :record-map="recordMap"
+            @open-record="onRefClick"
+          />
           <span v-else>…</span>
         </div>
       </article>
@@ -236,28 +214,38 @@
           v-model="draft"
           class="chat-input"
           rows="3"
-          placeholder="输入问题，@ 引用笔记，或从左侧拖入笔记/分类… ⌘/Ctrl+Enter 发送"
+          placeholder="输入问题，@ 引用笔记或分类，或从左侧拖入… ⌘/Ctrl+Enter 发送"
           :disabled="busy"
           @input="onInput"
           @keydown="onKeydown"
         />
         <ul v-if="mention.active && mentionItems.length" class="mention-popup">
           <li
-            v-for="(rec, idx) in mentionItems"
-            :key="rec.id"
-            :class="['mention-item', { 'mention-item--active': idx === mention.index }]"
-            @mousedown.prevent="selectMention(rec)"
+            v-for="(item, idx) in mentionItems"
+            :key="mentionKey(item)"
+            :class="[
+              'mention-item',
+              { 'mention-item--active': idx === mention.index, 'mention-item--folder': isFolderMention(item) },
+            ]"
+            @mousedown.prevent="selectMention(item)"
           >
-            <span
-              :class="['ref-source', rec.source === 'xiaohongshu' ? 'ref-source--xhs' : 'ref-source--bili']"
-            >
-              {{ rec.source === 'xiaohongshu' ? '小红书' : 'B站' }}
-            </span>
-            <span class="mention-title">{{ mentionLabel(rec) }}</span>
-            <span class="mention-meta">{{ mentionMeta(rec) }}</span>
+            <template v-if="isFolderMention(item)">
+              <span class="mention-folder-icon">📂</span>
+              <span class="mention-title">{{ mentionLabel(item) }}</span>
+              <span class="mention-meta">{{ mentionMeta(item) }}</span>
+            </template>
+            <template v-else>
+              <span
+                :class="['ref-source', item.source === 'xiaohongshu' ? 'ref-source--xhs' : 'ref-source--bili']"
+              >
+                {{ item.source === 'xiaohongshu' ? '小红书' : 'B站' }}
+              </span>
+              <span class="mention-title">{{ mentionLabel(item) }}</span>
+              <span class="mention-meta">{{ mentionMeta(item) }}</span>
+            </template>
           </li>
         </ul>
-        <p v-else-if="mention.active && !mentionItems.length" class="mention-empty">无匹配笔记</p>
+        <p v-else-if="mention.active && !mentionItems.length" class="mention-empty">无匹配笔记或分类</p>
       </div>
       <button type="button" class="btn primary chat-send" :disabled="busy || !draft.trim()" @click="send">
         {{ busy ? '生成中…' : '发送' }}
@@ -269,13 +257,14 @@
 
 <script>
 import { DRAG_FOLDER_MIME, DRAG_RECORD_MIME } from './dragMime.js';
+import { mentionQueryMatch } from './mentionSearch.js';
+import ChatMessageBody from './ChatMessageBody.vue';
 
 const THREAD_KEY = 'b-subtitle-chat-thread';
 
-const MSG_REF_RE = /@\[([^\]]*)\]\(([^)]+)\)/g;
-
 export default {
   name: 'ChatPanel',
+  components: { ChatMessageBody },
   emits: ['open-record'],
   props: {
     width: { type: Number, default: 400 },
@@ -284,6 +273,7 @@ export default {
     selectedIds: { type: Array, default: () => [] },
     recordMap: { type: Object, default: () => ({}) },
     allRecords: { type: Array, default: () => [] },
+    allFolders: { type: Array, default: () => [] },
   },
   data() {
     return {
@@ -306,6 +296,7 @@ export default {
       dropActive: false,
       dropDepth: 0,
       refHint: '',
+      copyHintKey: '',
       mention: { active: false, query: '', start: 0, index: 0 },
       toolSteps: [],
     };
@@ -318,9 +309,13 @@ export default {
     mentionItems() {
       if (!this.mention.active) return [];
       const q = this.mention.query.toLowerCase();
-      const list = this.allRecords.length ? this.allRecords : Object.values(this.recordMap);
+      const folders = (this.allFolders || []).map((f) => ({ ...f, mentionType: 'folder' }));
+      const records = (this.allRecords.length ? this.allRecords : Object.values(this.recordMap)).map(
+        (r) => ({ ...r, mentionType: 'record' }),
+      );
+      const list = [...folders, ...records];
       if (!q) return list.slice(0, 20);
-      return list.filter((r) => this.mentionMatch(r, q)).slice(0, 20);
+      return list.filter((item) => this.mentionMatch(item, q)).slice(0, 20);
     },
   },
   mounted() {
@@ -338,6 +333,7 @@ export default {
   },
   beforeUnmount() {
     clearTimeout(this._refHintTimer);
+    clearTimeout(this._copyHintTimer);
     document.removeEventListener('click', this.onToolsOutsideClick, true);
   },
   methods: {
@@ -430,19 +426,34 @@ export default {
       });
       return true;
     },
-    attachFolderAsMention(folderId, name, recordCount) {
+    attachFolderAsMention(folderId, name, recordCount, { at, after, focus = false } = {}) {
       if (!this.addFolderRef(folderId, name, recordCount)) return false;
       const insert = `@[分类:${name}](folder:${folderId})`;
-      const prefix = this.draft.length && !/\s$/.test(this.draft) ? ' ' : '';
-      this.draft = `${this.draft}${prefix}${insert} `;
-      this.closeMention();
-      this.$nextTick(() => {
+      if (at != null) {
         const ta = this.$refs.inputRef;
-        if (ta) {
-          ta.focus();
-          ta.setSelectionRange(this.draft.length, this.draft.length);
+        const afterPos = after ?? ta?.selectionStart ?? this.draft.length;
+        const before = this.draft.slice(0, at);
+        const afterText = this.draft.slice(afterPos);
+        this.draft = `${before}${insert} ${afterText}`;
+        if (focus && ta) {
+          this.$nextTick(() => {
+            const pos = before.length + insert.length + 1;
+            ta.focus();
+            ta.setSelectionRange(pos, pos);
+          });
         }
-      });
+      } else {
+        const prefix = this.draft.length && !/\s$/.test(this.draft) ? ' ' : '';
+        this.draft = `${this.draft}${prefix}${insert} `;
+        this.$nextTick(() => {
+          const ta = this.$refs.inputRef;
+          if (ta) {
+            ta.focus();
+            ta.setSelectionRange(this.draft.length, this.draft.length);
+          }
+        });
+      }
+      this.closeMention();
       return true;
     },
     attachRecordAsMention(id, { at, after, focus = false } = {}) {
@@ -591,54 +602,70 @@ export default {
         displayTitle: rec ? this.mentionLabel(rec) : fallbackTitle || id,
       };
     },
-    parseMessageContent(text) {
-      if (!text) return [{ type: 'text', text: '' }];
-      const segments = [];
-      let lastIndex = 0;
-      MSG_REF_RE.lastIndex = 0;
-      let match = MSG_REF_RE.exec(text);
-      while (match) {
-        if (match.index > lastIndex) {
-          segments.push({ type: 'text', text: text.slice(lastIndex, match.index) });
-        }
-        const id = match[2];
-        if (id.startsWith('folder:')) {
-          const folderId = id.slice('folder:'.length);
-          const displayName = (match[1] || '').replace(/^分类:/, '') || folderId;
-          segments.push({
-            type: 'folder-ref',
-            folderId,
-            displayName,
-          });
-        } else {
-          segments.push({
-            type: 'ref',
-            id,
-            ...this.refMeta(id, match[1]),
-          });
-        }
-        lastIndex = MSG_REF_RE.lastIndex;
-        match = MSG_REF_RE.exec(text);
+    copyKey(m, idx) {
+      return `msg-${idx}-${m.role}`;
+    },
+    messageCopyText(m) {
+      if (m.role === 'tools') {
+        return (m.steps || [])
+          .map((s) => {
+            const label = s.label || s.name || '';
+            const preview = s.preview || '';
+            return preview ? `${label}: ${preview}` : label;
+          })
+          .filter(Boolean)
+          .join('\n');
       }
-      if (lastIndex < text.length) {
-        segments.push({ type: 'text', text: text.slice(lastIndex) });
+      return m.content || '';
+    },
+    async copyText(text, hintKey = 'copy') {
+      const payload = (text || '').trim();
+      if (!payload) return;
+      try {
+        await navigator.clipboard.writeText(payload);
+      } catch {
+        const ta = document.createElement('textarea');
+        ta.value = payload;
+        ta.style.position = 'fixed';
+        ta.style.left = '-9999px';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
       }
-      return segments.length ? segments : [{ type: 'text', text }];
+      this.copyHintKey = hintKey;
+      clearTimeout(this._copyHintTimer);
+      this._copyHintTimer = setTimeout(() => {
+        this.copyHintKey = '';
+      }, 1600);
+    },
+    copyMessage(m, idx) {
+      this.copyText(this.messageCopyText(m), this.copyKey(m, idx));
     },
     onRefClick(id) {
       if (!id) return;
       this.$emit('open-record', id);
     },
-    mentionLabel(rec) {
-      return rec.title || rec.bvid || rec.note_id || rec.id;
+    isFolderMention(item) {
+      return item?.mentionType === 'folder' || item?.type === 'folder';
     },
-    mentionMeta(rec) {
-      if (rec.source === 'xiaohongshu') return rec.note_id || rec.id;
-      return rec.bvid ? `${rec.bvid} · P${rec.page || 1}` : rec.id;
+    mentionKey(item) {
+      return this.isFolderMention(item) ? `folder:${item.folderId}` : item.id;
     },
-    mentionMatch(rec, q) {
-      const hay = [rec.title, rec.bvid, rec.note_id, rec.id].filter(Boolean).join(' ').toLowerCase();
-      return hay.includes(q);
+    mentionLabel(item) {
+      if (this.isFolderMention(item)) return item.name || item.folderId;
+      return item.title || item.bvid || item.note_id || item.id;
+    },
+    mentionMeta(item) {
+      if (this.isFolderMention(item)) {
+        const n = item.recordCount ?? 0;
+        return item.path && item.path !== item.name ? `${item.path} · ${n} 条` : `${n} 条笔记`;
+      }
+      if (item.source === 'xiaohongshu') return item.note_id || item.id;
+      return item.bvid ? `${item.bvid} · P${item.page || 1}` : item.id;
+    },
+    mentionMatch(item, q) {
+      return mentionQueryMatch(item, q, { isFolder: this.isFolderMention(item) });
     },
     closeMention() {
       this.mention = { active: false, query: '', start: 0, index: 0 };
@@ -659,11 +686,24 @@ export default {
       }
       this.mention = { active: true, query, start: atIdx, index: 0 };
     },
-    selectMention(record) {
+    selectMention(item) {
       const ta = this.$refs.inputRef;
       if (!ta) return;
-      const title = this.mentionLabel(record);
-      this.attachRecordAsMention(record.id, {
+      if (this.isFolderMention(item)) {
+        const name = this.mentionLabel(item);
+        if (
+          this.attachFolderAsMention(item.folderId, name, item.recordCount, {
+            at: this.mention.start,
+            after: ta.selectionStart,
+            focus: true,
+          })
+        ) {
+          this.showRefHint(`已 @ 引用分类：${name}`);
+        }
+        return;
+      }
+      const title = this.mentionLabel(item);
+      this.attachRecordAsMention(item.id, {
         at: this.mention.start,
         after: ta.selectionStart,
         focus: true,
@@ -1058,18 +1098,52 @@ export default {
 .chat-msg {
   margin-bottom: 14px;
 }
+.chat-msg-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+}
 .chat-role {
   font-size: 0.72rem;
   color: #8b94b8;
-  margin-bottom: 4px;
+}
+.chat-msg-copy {
+  flex-shrink: 0;
+  padding: 2px 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: #7a84a8;
+  font-size: 0.68rem;
+  cursor: pointer;
+  font-family: inherit;
+  opacity: 0;
+  transition: opacity 0.12s, color 0.12s, border-color 0.12s, background 0.12s;
+}
+.chat-msg:hover .chat-msg-copy,
+.chat-msg-copy:focus-visible {
+  opacity: 1;
+}
+.chat-msg-copy:hover {
+  color: #b8c0e0;
+  border-color: #3d4a7a;
+  background: #1a2040;
 }
 .chat-bubble {
   padding: 10px 12px;
   border-radius: 10px;
   font-size: 0.88rem;
   line-height: 1.55;
-  white-space: pre-wrap;
   word-break: break-word;
+}
+.chat-msg--user :deep(.msg-ref) {
+  background: #1a2240;
+  border-color: #4a6cf0;
+}
+.chat-msg--user :deep(.msg-ref:hover) {
+  background: #243055;
 }
 .chat-msg--user .chat-bubble {
   background: #243055;
@@ -1110,39 +1184,6 @@ export default {
 }
 .tool-step-status.err {
   color: #ff8a8a;
-}
-.chat-text {
-  white-space: pre-wrap;
-}
-.msg-ref {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 1px 8px 1px 4px;
-  margin: 0 1px;
-  vertical-align: baseline;
-  background: #1c2440;
-  border: 1px solid #3d4a7a;
-  border-radius: 999px;
-  font-size: 0.78rem;
-  color: #b8c0e0;
-  cursor: pointer;
-  font-family: inherit;
-  line-height: 1.45;
-  max-width: min(100%, 280px);
-  transition: background 0.12s, border-color 0.12s, color 0.12s;
-}
-.msg-ref:hover {
-  background: #243055;
-  border-color: #4a6cf0;
-  color: #e8ecff;
-}
-.chat-msg--user .msg-ref {
-  background: #1a2240;
-  border-color: #4a6cf0;
-}
-.chat-msg--user .msg-ref:hover {
-  background: #243055;
 }
 .chat-refs {
   flex-shrink: 0;
@@ -1399,6 +1440,10 @@ export default {
 .mention-item:hover,
 .mention-item--active {
   background: #243055;
+}
+.mention-item--folder .mention-folder-icon {
+  flex-shrink: 0;
+  font-size: 0.9rem;
 }
 .mention-title {
   flex: 1;
