@@ -106,7 +106,6 @@ class Pipeline:
                     if hist_plan and hist_plan.get("steps"):
                         plan = {**hist_plan, "requires_confirmation": True}
                 if plan.get("requires_confirmation") and plan.get("steps"):
-                    fsm.transition(TaskPhase.AWAITING_CONFIRMATION)
                     async for ev in self._present_plan(ctx, plan, fsm):
                         yield ev
                     return
@@ -116,18 +115,19 @@ class Pipeline:
                     async for ev in self._execute_plan(ctx, plan, fsm):
                         yield ev
                     return
-                fsm.transition(TaskPhase.AWAITING_CONFIRMATION)
                 async for ev in self._present_plan(ctx, plan, fsm):
                     yield ev
                 return
 
             if route.kind == "query":
                 yield StepEvent.phase("executing")
+                fsm.transition(TaskPhase.EXECUTING)
                 async for ev in self._query_tools(ctx, fsm):
                     yield ev
                 return
 
             yield StepEvent.phase("executing")
+            fsm.transition(TaskPhase.EXECUTING)
             async for ev in self._read(ctx, fsm):
                 yield ev
 
@@ -409,6 +409,11 @@ def _self_check() -> None:
     p = Pipeline()
     assert len(p.registry.get_openai_tools()) == 8
     assert p._tool_step_dict("list_records", ok=True, preview="count=1")["name"] == "list_records"
+    fsm = TaskState()
+    fsm.transition(TaskPhase.EXECUTING)
+    fsm.transition(TaskPhase.DONE)
+    fsm.transition(TaskPhase.IDLE)
+    assert fsm.phase == TaskPhase.IDLE
     moved, created, failed = _accumulate_plan_summary(
         "move_records",
         '{"ok":true,"moved":["a","b"],"failed":[]}',

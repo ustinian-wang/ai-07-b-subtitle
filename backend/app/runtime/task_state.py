@@ -34,6 +34,8 @@ class TaskState:
         return target in _TRANSITIONS.get(self.phase, frozenset())
 
     def transition(self, target: TaskPhase) -> None:
+        if self.phase == target:
+            return
         if not self.can_transition(target):
             raise ValueError(f"非法状态迁移: {self.phase.value} → {target.value}")
         self.phase = target
@@ -54,6 +56,7 @@ class TaskState:
 
 def _self_check() -> None:
     ts = TaskState()
+    ts.transition(TaskPhase.PLANNING)
     ts.transition(TaskPhase.PLANNING)
     ts.transition(TaskPhase.AWAITING_CONFIRMATION)
     ts.transition(TaskPhase.EXECUTING)
