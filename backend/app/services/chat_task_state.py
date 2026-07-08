@@ -67,6 +67,8 @@ def detect_confirmation(
         return True
     if re.search(r"直接移动|真正执行|立刻执行|马上执行|执行移动", t):
         return True
+    if re.search(r"并修改|帮我修改|执行分类|按此方案|就按|开始调整|调整.*分类", t):
+        return True
     # ponytail: 有待确认方案时，短句非否定回复视为确认
     if pending_plan or awaiting_confirmation:
         if len(t) <= 8 and not _is_denial(t):
@@ -322,6 +324,7 @@ def _self_check() -> None:
     assert detect_confirmation("去")
     assert detect_confirmation("愿意")
     assert detect_confirmation("嗯", awaiting_confirmation=True)
+    assert detect_confirmation("行，你帮我调整笔记的分类，并修改")
     assert not detect_confirmation("未分类有多少")
     assert not detect_confirmation("不要", awaiting_confirmation=True)
     assert infer_folder_name_from_text("移到未分类下") == "未分类"

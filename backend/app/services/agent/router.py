@@ -83,6 +83,10 @@ def route_by_rules(
         return RouteDecision(kind="query")
     if re.search(r"直接移动|真正执行|立刻执行|马上执行|按.*移动", text):
         return RouteDecision(kind="mutate", mutate_goal="move_records", auto_execute=True)
+    if re.search(r"并修改|帮我调整|帮我修改|执行分类|按.*修改|开始分类", text):
+        if re.search(r"分类|整理|分城市|重新分配", text):
+            return RouteDecision(kind="mutate", mutate_goal="classify_by_city", auto_execute=True)
+        return RouteDecision(kind="mutate", mutate_goal="move_records", auto_execute=True)
     return None
 
 
@@ -168,6 +172,8 @@ def _self_check() -> None:
     assert route_by_rules("不要", pending_plan={"steps": []}, awaiting_confirmation=True).kind == "cancel"
     assert route_by_rules("你读取笔记的内容", pending_plan=None, awaiting_confirmation=False).kind == "query"
     assert route_by_rules("直接移动笔记", pending_plan=None, awaiting_confirmation=False).auto_execute is True
+    r = route_by_rules("行，你帮我调整笔记的分类，并修改", pending_plan=None, awaiting_confirmation=False)
+    assert r and r.is_mutate and r.mutate_goal == "classify_by_city" and r.auto_execute
     r = parse_route_payload('{"kind":"mutate","mutate_goal":"move_records","auto_execute":true}')
     assert r.is_mutate and r.mutate_goal == "move_records" and r.auto_execute
 

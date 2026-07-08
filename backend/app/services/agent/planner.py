@@ -180,12 +180,28 @@ def plan_for_confirm(
     pending_plan: dict[str, Any] | None,
     history: list[dict[str, Any]],
     user_message: str,
+    *,
+    ref_ids: list[str] | None = None,
+    folder_ids: list[str] | None = None,
 ) -> dict[str, Any] | None:
     if pending_plan and pending_plan.get("steps"):
         return pending_plan
     hist_plan = build_move_plan_from_history(history, user_message)
     if hist_plan and hist_plan.get("steps"):
         return hist_plan
+    # ponytail: pending 无 steps 时从会话引用重建分类 plan（覆盖旧会话仅 Markdown 方案）
+    goal = (pending_plan or {}).get("goal") or ""
+    if goal == "classify" or _CLASSIFY_RE.search(user_message or ""):
+        rebuilt = plan_classify(
+            ref_ids or [],
+            folder_ids or [],
+            history,
+            auto_execute=True,
+            user_message=user_message,
+        )
+        if rebuilt.get("steps"):
+            rebuilt["requires_confirmation"] = False
+            return rebuilt
     return pending_plan
 
 

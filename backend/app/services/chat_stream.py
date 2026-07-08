@@ -576,6 +576,8 @@ async def sse_chat_stream(
                 pending if isinstance(pending, dict) else None,
                 history,
                 user_message,
+                ref_ids=ref_ids,
+                folder_ids=folder_ids,
             )
             if plan and plan.get("steps"):
                 async for chunk in _stream_execute_plan(
@@ -583,8 +585,13 @@ async def sse_chat_stream(
                 ):
                     yield chunk
                 return
-            # 无 plan 时降级为 mutate 重新规划
-            route = RouteDecision(kind="mutate", mutate_goal="generic", auto_execute=True)
+            # 无 plan 时降级为 mutate 重新规划（优先分类/移动意图）
+            fallback_goal = agent_planner.infer_mutate_goal(user_message) or "classify_by_city"
+            route = RouteDecision(
+                kind="mutate",
+                mutate_goal=fallback_goal,
+                auto_execute=True,
+            )
 
         if route.kind == "cancel":
             agent_memory.clear_pending(thread_id)
@@ -611,6 +618,12 @@ async def sse_chat_stream(
                 hist_plan = build_move_plan_from_history(history, user_message)
                 if hist_plan and hist_plan.get("steps"):
                     plan = {**hist_plan, "requires_confirmation": False}
+            if plan.get("requires_confirmation") and not plan.get("steps"):
+                from app.services.chat_task_state import build_move_plan_from_history
+
+                hist_plan = build_move_plan_from_history(history, user_message)
+                if hist_plan and hist_plan.get("steps"):
+                    plan = {**hist_plan, "requires_confirmation": True}
             if plan.get("requires_confirmation") and plan.get("steps"):
                 async for chunk in _stream_present_plan(
                     client, model, thread_id, user_message, history, ref_ids, folder_ids, plan
