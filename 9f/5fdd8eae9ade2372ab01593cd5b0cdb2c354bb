@@ -1,0 +1,23 @@
+backend/app/runtime/pipeline.py
+  s_494438b44b9e5c::t_9a4ead0c49881c 412-416
+  s_494438b44b9e5c::t_4d6f0b25959376 124,130
+backend/app/runtime/task_state.py
+  s_494438b44b9e5c::t_0ebc67be264d3d 37-38
+  s_494438b44b9e5c::t_f5ad0cc648e075 60
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "9f5fdd8eae9ade2372ab01593cd5b0cdb2c354bb",
+  "prompts": {},
+  "sessions": {
+    "s_494438b44b9e5c": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "72812374-9fa8-4ff5-909a-110ac9a87421",
+        "model": "default"
+      },
+      "human_author": "jser <87244899@qq.com>"
+    }
+  }
+}
