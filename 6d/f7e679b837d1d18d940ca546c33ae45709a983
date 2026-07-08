@@ -1,0 +1,28 @@
+backend/app/services/chat_task_state.py
+  s_494438b44b9e5c::t_f578a358ee06e6 70-71
+  s_494438b44b9e5c::t_8322a7460d9a09 327
+backend/app/services/agent/router.py
+  s_494438b44b9e5c::t_876a34d9d7df0a 175-176
+  s_494438b44b9e5c::t_8b23ebcdb3fb8f 86-89
+backend/app/services/chat_stream.py
+  s_494438b44b9e5c::t_57e6ec3e0b8db2 579-580,588-594
+  s_494438b44b9e5c::t_17aea006c0ea0d 621-626
+backend/app/services/agent/planner.py
+  s_494438b44b9e5c::t_b6100e848888af 183-185,192-204
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "6df7e679b837d1d18d940ca546c33ae45709a983",
+  "prompts": {},
+  "sessions": {
+    "s_494438b44b9e5c": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "72812374-9fa8-4ff5-909a-110ac9a87421",
+        "model": "default"
+      },
+      "human_author": "jser <87244899@qq.com>"
+    }
+  }
+}
