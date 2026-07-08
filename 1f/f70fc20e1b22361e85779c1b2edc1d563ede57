@@ -1,0 +1,66 @@
+backend/app/runtime/events.py
+  s_348cfdfb3d6a6f::t_22e8aa09fcfb3d 45-48,50,57
+  s_994e06ed6e52cd::t_9352c3a5ec2286 1-44,49,51-56,58-62
+backend/app/runtime/context.py
+  s_994e06ed6e52cd::t_bb6e4b2bace3a8 1-62
+backend/app/runtime/pipeline.py
+  s_348cfdfb3d6a6f::t_d82f73044ea741 336-364,372-373,387-388,393-394,400-401
+  s_348cfdfb3d6a6f::t_a3077a14dac8aa 59,144-166,179,217,244,271,301,333
+  s_348cfdfb3d6a6f::t_5ebf4293b904fb 114-130
+  s_348cfdfb3d6a6f::t_2eee593eca35a9 48
+  s_348cfdfb3d6a6f::t_33ad9a641e240e 88
+  s_348cfdfb3d6a6f::t_d1272991ba0975 62
+  s_348cfdfb3d6a6f::t_3cb769d8c2524e 412-420
+  s_994e06ed6e52cd::t_704646478b1f1b 1-47,49-58,60-61,63-87,89-113,131-143,167-178,180-216,218-243,245-270,272-300,302-332,334-335,365-371,374-386,389-392,395-399,402-411,421-425
+backend/app/services/chat_stream.py
+  s_348cfdfb3d6a6f::t_585872d27c2e6f 64
+  s_994e06ed6e52cd::t_d6e9f3787f83a8 10
+  s_994e06ed6e52cd::t_c616d715a88b33 1,9,11-13,56-57,60-62,71-81,83-85,89-90,93-95
+  s_994e06ed6e52cd::t_c5abbc9ccc8210 86
+backend/app/runtime/plugins/__init__.py
+  s_994e06ed6e52cd::t_925384eb70e1ab 1-4
+backend/app/runtime/plugin.py
+  s_994e06ed6e52cd::t_05bca9bf17efed 1-50
+backend/app/services/chat_tools.py
+  s_994e06ed6e52cd::t_c38968e56f3a06 47-59,61,65
+  s_994e06ed6e52cd::t_be4b483fa450db 169-170
+  s_994e06ed6e52cd::t_64cb38a3c31c50 1,8,334-373,377
+backend/app/runtime/plugins/note_library.py
+  s_994e06ed6e52cd::t_716de3ab661c4e 1-312
+backend/app/runtime/tool_registry.py
+  s_994e06ed6e52cd::t_730f568f34977c 1-95
+backend/app/runtime/task_state.py
+  s_994e06ed6e52cd::t_a4304d914a5615 1-16,18-68
+  s_994e06ed6e52cd::t_29374d31273eab 17
+README.md
+  s_994e06ed6e52cd::t_d8aaa2a9cd3209 208-231
+backend/app/runtime/sse.py
+  s_994e06ed6e52cd::t_89ab176efbcb9a 1-18,21-25
+  s_348cfdfb3d6a6f::t_e01cfd588bafa6 19-20
+backend/app/runtime/__init__.py
+  s_994e06ed6e52cd::t_345d43370c01e0 1-13
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "1ff70fc20e1b22361e85779c1b2edc1d563ede57",
+  "prompts": {},
+  "sessions": {
+    "s_348cfdfb3d6a6f": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "00bd9d2d-edbf-4329-92ff-55f7d1a6ed2f",
+        "model": "default"
+      },
+      "human_author": "jser <87244899@qq.com>"
+    },
+    "s_994e06ed6e52cd": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "5d6cb7e4-2b48-4c15-b341-d905ad708afb",
+        "model": "default"
+      },
+      "human_author": "jser <87244899@qq.com>"
+    }
+  }
+}
