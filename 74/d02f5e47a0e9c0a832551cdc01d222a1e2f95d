@@ -1,0 +1,19 @@
+backend/app/services/chat_stream.py
+  s_348cfdfb3d6a6f::t_3963249a333d64 57-58
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "74d02f5e47a0e9c0a832551cdc01d222a1e2f95d",
+  "prompts": {},
+  "sessions": {
+    "s_348cfdfb3d6a6f": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "00bd9d2d-edbf-4329-92ff-55f7d1a6ed2f",
+        "model": "default"
+      },
+      "human_author": "jser <87244899@qq.com>"
+    }
+  }
+}
