@@ -75,6 +75,8 @@
         <LibraryTree
           :folders="tree.folders"
           :uncategorized="tree.uncategorized"
+          :all-record-ids="allRecordIds"
+          :total-count="tree.total_count || allRecordIds.length"
           :expanded-ids="expandedIds"
           :selected-ids="selectedIds"
           :dragging-record-ids="draggingRecordIds"
@@ -254,6 +256,7 @@
 import SettingsPage from './SettingsPage.vue';
 import LibraryTree from './LibraryTree.vue';
 import ChatPanel from './ChatPanel.vue';
+import { ALL_FOLDER_ID } from './dragMime.js';
 
 export default {
   name: 'App',
@@ -267,7 +270,7 @@ export default {
       error: '',
       result: null,
       tree: { folders: [], uncategorized: [], total_count: 0 },
-      expandedIds: new Set(['__uncategorized__']),
+      expandedIds: new Set([ALL_FOLDER_ID, '__uncategorized__']),
       activeFolderId: null,
       selectedIds: [],
       copied: false,
@@ -386,6 +389,13 @@ export default {
         }
       };
       walk(this.tree.folders);
+      out.unshift({
+        type: 'folder',
+        folderId: ALL_FOLDER_ID,
+        name: '全部',
+        recordCount: this.tree.total_count || this.allRecordIds.length,
+        path: '全部',
+      });
       out.unshift({
         type: 'folder',
         folderId: '__uncategorized__',
@@ -615,6 +625,10 @@ export default {
     },
     async onFolderDrop(folderId) {
       if (this.dragPurpose === 'ref' || this.dragPurpose === 'folder-ref') return;
+      if (folderId === ALL_FOLDER_ID) {
+        this.onRecordDragEnd();
+        return;
+      }
       const ids = this.draggingRecordIds.length ? this.draggingRecordIds : [...this.selectedIds];
       const targetId = folderId === '__uncategorized__' ? null : folderId;
       await this.moveRecordsToFolder(ids, targetId);
@@ -685,6 +699,7 @@ export default {
     },
     autoExpandFoldersWithRecords() {
       const next = new Set(this.expandedIds);
+      next.add(ALL_FOLDER_ID);
       next.add('__uncategorized__');
       const walk = (folders) => {
         for (const f of folders || []) {

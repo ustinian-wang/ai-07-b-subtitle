@@ -9,7 +9,9 @@ function normalizePy(s) {
 
 function mentionSearchTexts(item, isFolder) {
   if (isFolder) {
-    return [item.name, item.path, '分类', '文件夹', '未分类'].filter(Boolean);
+    const extra =
+      item.folderId === '__all__' ? ['全部', '所有', 'all', '根', 'quanbu'] : ['分类', '文件夹'];
+    return [item.name, item.path, ...extra, '未分类'].filter(Boolean);
   }
   return [item.title, item.bvid, item.note_id, item.id].filter(Boolean);
 }

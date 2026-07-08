@@ -9,7 +9,7 @@ from app.runtime.context import RunContext
 from app.runtime.tool_registry import ToolRegistry, ToolSpec
 from app.services import chat_tools
 from app.services.chat_classify_plan import build_classify_plan_block
-from app.services.folder_store import get_folder, is_uncategorized_folder_id
+from app.services.folder_store import get_folder, is_all_folder_id, is_uncategorized_folder_id
 from app.services.subtitle_store import get_record, infer_source, list_record_ids_in_folder
 
 SYSTEM_PROMPT = """你是笔记分析助手。用户会引用本地库中的 B 站字幕或小红书笔记作为上下文。
@@ -92,6 +92,8 @@ def build_messages(
 
 
 def _folder_display_name(folder_id: str) -> str:
+    if is_all_folder_id(folder_id):
+        return "全部"
     if is_uncategorized_folder_id(folder_id):
         return "未分类"
     folder = get_folder(folder_id)

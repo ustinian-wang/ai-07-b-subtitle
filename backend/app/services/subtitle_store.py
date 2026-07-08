@@ -199,13 +199,24 @@ def list_records() -> list[dict[str, Any]]:
 def list_record_ids_in_folder(folder_id: str, *, include_descendants: bool = True) -> list[str]:
     """列出文件夹内笔记 id；用户文件夹默认含子文件夹，未分类仅直接归属。"""
     from app.services.folder_store import (
+        ALL_FOLDER_ID,
         UNCATEGORIZED_FOLDER_ID,
         descendant_folder_ids,
         get_folder,
+        is_all_folder_id,
         is_uncategorized_folder_id,
         normalize_folder_id,
         user_folder_ids,
     )
+
+    if is_all_folder_id(folder_id):
+        ids: list[str] = []
+        for path in _records_dir().glob("*.json"):
+            rec = _read_file(path)
+            if rec:
+                ids.append(str(rec.get("id") or path.stem))
+        ids.sort()
+        return ids
 
     valid = user_folder_ids()
     fid = normalize_folder_id(folder_id, valid)

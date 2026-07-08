@@ -13,6 +13,8 @@ _FOLDERS_PATH = BACKEND_ROOT / "data" / "folders.json"
 
 UNCATEGORIZED_FOLDER_ID = "__uncategorized__"
 UNCATEGORIZED_FOLDER_NAME = "未分类"
+ALL_FOLDER_ID = "__all__"
+ALL_FOLDER_NAME = "全部"
 
 
 def _now_iso() -> str:
@@ -24,7 +26,11 @@ def _ensure_dir() -> None:
 
 
 def is_system_folder(folder_id: str | None) -> bool:
-    return folder_id == UNCATEGORIZED_FOLDER_ID
+    return folder_id in (UNCATEGORIZED_FOLDER_ID, ALL_FOLDER_ID)
+
+
+def is_all_folder_id(folder_id: str | None) -> bool:
+    return folder_id == ALL_FOLDER_ID
 
 
 def is_uncategorized_folder_id(folder_id: str | None) -> bool:
@@ -104,6 +110,8 @@ def normalize_folder_id(folder_id: str | None, valid_user_folder_ids: set[str] |
     """null / 空 / 已删文件夹 → 未分类系统 id。"""
     if is_uncategorized_folder_id(folder_id):
         return UNCATEGORIZED_FOLDER_ID
+    if is_all_folder_id(folder_id):
+        return ALL_FOLDER_ID
     valid = valid_user_folder_ids if valid_user_folder_ids is not None else user_folder_ids()
     fid = str(folder_id or "").strip()
     if fid in valid:
@@ -111,9 +119,23 @@ def normalize_folder_id(folder_id: str | None, valid_user_folder_ids: set[str] |
     return UNCATEGORIZED_FOLDER_ID
 
 
+def _virtual_all_folder() -> dict[str, Any]:
+    return {
+        "id": ALL_FOLDER_ID,
+        "name": ALL_FOLDER_NAME,
+        "parent_id": None,
+        "system": True,
+        "created_at": "",
+        "updated_at": "",
+    }
+
+
 def list_folders() -> list[dict[str, Any]]:
     items = sorted(_load_raw(), key=lambda x: (x.get("name") or "").lower())
-    return [_public(x) for x in items]
+    public = [_public(x) for x in items]
+    if not any(x.get("id") == ALL_FOLDER_ID for x in public):
+        public.insert(0, _virtual_all_folder())
+    return public
 
 
 def list_user_folders() -> list[dict[str, Any]]:
@@ -121,6 +143,8 @@ def list_user_folders() -> list[dict[str, Any]]:
 
 
 def get_folder(folder_id: str) -> dict[str, Any] | None:
+    if is_all_folder_id(folder_id):
+        return _virtual_all_folder()
     for item in _load_raw():
         if item.get("id") == folder_id:
             return _public(item)
@@ -153,7 +177,7 @@ def create_folder(name: str, parent_id: str | None = None) -> dict[str, Any]:
     name = (name or "").strip()
     if not name:
         raise ValueError("文件夹名称不能为空")
-    if name == UNCATEGORIZED_FOLDER_NAME:
+    if name == UNCATEGORIZED_FOLDER_NAME or name == ALL_FOLDER_NAME:
         raise ValueError("不能使用系统保留名称")
     items = _load_raw()
     if parent_id:
@@ -195,7 +219,7 @@ def update_folder(
         name = name.strip()
         if not name:
             raise ValueError("文件夹名称不能为空")
-        if name == UNCATEGORIZED_FOLDER_NAME:
+        if name == UNCATEGORIZED_FOLDER_NAME or name == ALL_FOLDER_NAME:
             raise ValueError("不能使用系统保留名称")
         item["name"] = name
 
@@ -276,6 +300,9 @@ def _self_check() -> None:
         assert "不可修改" in str(exc)
     assert normalize_folder_id(None) == UNCATEGORIZED_FOLDER_ID
     assert normalize_folder_id("missing-id") == UNCATEGORIZED_FOLDER_ID
+    assert normalize_folder_id(ALL_FOLDER_ID) == ALL_FOLDER_ID
+    assert get_folder(ALL_FOLDER_ID) is not None
+    assert is_all_folder_id(ALL_FOLDER_ID)
 
     f1 = create_folder("测试A")
     f2 = create_folder("测试B", parent_id=f1["id"])

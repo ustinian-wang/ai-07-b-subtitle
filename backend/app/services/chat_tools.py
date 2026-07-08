@@ -8,9 +8,12 @@ from typing import Any
 from app.runtime.tool_registry import TOOL_CATEGORIES, ToolRegistry, ToolSpec
 from app.services.bilibili import BilibiliError, fetch_subtitles, format_subtitle_text, parse_bilibili_ref
 from app.services.folder_store import (
+    ALL_FOLDER_ID,
+    ALL_FOLDER_NAME,
     UNCATEGORIZED_FOLDER_ID,
     create_folder,
     get_folder,
+    is_all_folder_id,
     is_system_folder,
     is_uncategorized_folder_id,
     list_folders,
@@ -123,6 +126,8 @@ def resolve_folder_name(name: str) -> str | None:
     key = raw.lower()
     if key in ("未分类", "uncategorized"):
         return "未分类"
+    if key in ("全部", "all"):
+        return ALL_FOLDER_NAME
     for folder in list_folders():
         fname = (folder.get("name") or "").strip()
         if fname.lower() == key:
@@ -137,6 +142,8 @@ def _folder_id_by_name(name: str) -> str | None:
     key = resolved.lower()
     if key in ("未分类", "uncategorized"):
         return UNCATEGORIZED_FOLDER_ID
+    if key in ("全部", "all"):
+        return ALL_FOLDER_ID
     for folder in list_folders():
         if (folder.get("name") or "").strip().lower() == key:
             return folder.get("id")
@@ -152,6 +159,8 @@ def _resolve_folder_target(args: dict[str, Any]) -> tuple[str | None, str | None
         fid = _folder_id_by_name(str(args["folder_name"]))
         if not fid:
             return None, f"文件夹不存在: {args['folder_name']}"
+        if is_all_folder_id(fid):
+            return None, "不能移动到「全部」分类"
         if is_uncategorized_folder_id(fid):
             return None, None
         return fid, None
@@ -159,6 +168,8 @@ def _resolve_folder_target(args: dict[str, Any]) -> tuple[str | None, str | None
     if folder_id is None or folder_id == "":
         return None, None
     fid = str(folder_id).strip()
+    if is_all_folder_id(fid):
+        return None, "不能移动到「全部」分类"
     if is_uncategorized_folder_id(fid):
         return None, None
     if get_folder(fid):
@@ -177,7 +188,7 @@ def _tool_spec_defs() -> list[tuple[str, str, dict[str, Any]]]:
                     "keyword": {"type": "string", "description": "可选，标题关键词（不区分大小写）"},
                     "folder_id": {
                         "type": "string",
-                        "description": "按文件夹 id 过滤（同 folders[].id，未分类用 __uncategorized__）",
+                        "description": "按文件夹 id 过滤（全部 __all__，未分类 __uncategorized__）",
                     },
                     "folder_name": {
                         "type": "string",
@@ -398,8 +409,13 @@ def _list_records(args: dict[str, Any]) -> str:
             return json.dumps({"ok": False, "error": f"文件夹不存在: {folder_name}"}, ensure_ascii=False)
     elif folder_id is not None and str(folder_id).strip():
         fid = str(folder_id).strip()
-        filter_fid = UNCATEGORIZED_FOLDER_ID if is_uncategorized_folder_id(fid) else fid
-        if filter_fid != UNCATEGORIZED_FOLDER_ID and not get_folder(filter_fid):
+        if is_all_folder_id(fid):
+            filter_fid = ALL_FOLDER_ID
+        elif is_uncategorized_folder_id(fid):
+            filter_fid = UNCATEGORIZED_FOLDER_ID
+        else:
+            filter_fid = fid
+        if filter_fid not in (UNCATEGORIZED_FOLDER_ID, ALL_FOLDER_ID) and not get_folder(filter_fid):
             return json.dumps({"ok": False, "error": f"文件夹不存在: {fid}"}, ensure_ascii=False)
 
     if filter_fid:
