@@ -257,7 +257,7 @@
 
 <script>
 import { DRAG_FOLDER_MIME, DRAG_RECORD_MIME } from './dragMime.js';
-import { mentionQueryMatch } from './mentionSearch.js';
+import { mentionQueryScore } from './mentionSearch.js';
 import ChatMessageBody from './ChatMessageBody.vue';
 
 const THREAD_KEY = 'b-subtitle-chat-thread';
@@ -315,7 +315,15 @@ export default {
       );
       const list = [...folders, ...records];
       if (!q) return list.slice(0, 20);
-      return list.filter((item) => this.mentionMatch(item, q)).slice(0, 20);
+      return list
+        .map((item) => ({
+          item,
+          score: mentionQueryScore(item, q, { isFolder: this.isFolderMention(item) }),
+        }))
+        .filter((row) => row.score > 0)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 20)
+        .map((row) => row.item);
     },
   },
   mounted() {
@@ -663,9 +671,6 @@ export default {
       }
       if (item.source === 'xiaohongshu') return item.note_id || item.id;
       return item.bvid ? `${item.bvid} · P${item.page || 1}` : item.id;
-    },
-    mentionMatch(item, q) {
-      return mentionQueryMatch(item, q, { isFolder: this.isFolderMention(item) });
     },
     closeMention() {
       this.mention = { active: false, query: '', start: 0, index: 0 };
