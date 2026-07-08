@@ -1,0 +1,58 @@
+frontend/src/App.vue
+  s_494438b44b9e5c::t_e9b803ff6d9755 373-397
+  s_494438b44b9e5c::t_83cd8843156f35 245
+frontend/src/mentionSearch.js
+  s_494438b44b9e5c::t_8ef2502f1452bc 46
+  s_494438b44b9e5c::t_3a2044c2a9a24f 5-8
+  s_494438b44b9e5c::t_46df953d347d06 1-4,9-28,35-45,47-56
+  s_494438b44b9e5c::t_fc666780579348 29-34
+frontend/src/messageContent.js
+  s_494438b44b9e5c::t_41cebb723408c6 1-39
+frontend/src/ChatMessageBody.vue
+  s_494438b44b9e5c::t_4ee8fc3da5c2af 1-2,4-27,29-59,63-199
+  s_494438b44b9e5c::t_58c4995b4abe75 3,28
+  s_494438b44b9e5c::t_83f76daf911e68 60-62
+frontend/src/ChatPanel.vue
+  s_494438b44b9e5c::t_de911717a53645 605-617,619-634,636-641
+  s_494438b44b9e5c::t_d5de845fad7669 668
+  s_494438b44b9e5c::t_f5f7c0ba7124c5 1101-1107,1111-1132,1141-1146
+  s_494438b44b9e5c::t_a863c670551b1c 336
+  s_494438b44b9e5c::t_1f9d4702369a25 649-650,652-653,655-667
+  s_494438b44b9e5c::t_5f9333e1a3dd87 642-643
+  s_494438b44b9e5c::t_4588f1e347b502 68-73,75-78,89,93-95,107-118,120-125
+  s_494438b44b9e5c::t_5dd8298e2993c5 261
+  s_494438b44b9e5c::t_09816b69c7a370 74
+  s_494438b44b9e5c::t_20e0e6619c9eff 312-316,318
+  s_494438b44b9e5c::t_a09fe76d328702 689,692-706
+  s_494438b44b9e5c::t_bc7abe72289535 267
+  s_494438b44b9e5c::t_80250509ee14df 260
+  s_494438b44b9e5c::t_92f1957a6ba9b0 276
+  s_494438b44b9e5c::t_c7bc8af274327b 429,432,434-443,445-456
+  s_494438b44b9e5c::t_2cfcefdc0e13bd 224-230,232-245,248
+  s_494438b44b9e5c::t_f52941f0265a59 299
+  s_494438b44b9e5c::t_de29750b59c196 1147,1444-1447
+  s_494438b44b9e5c::t_264e857bf28c1e 217
+frontend/package.json
+  s_494438b44b9e5c::t_7cb5b7627b7187 13
+  s_494438b44b9e5c::t_82d166d696f96c 14
+frontend/src/chatMarkdown.js
+  s_494438b44b9e5c::t_640f4e5479448c 1-13
+frontend/package-lock.json
+  s_494438b44b9e5c::t_e9dfa36c813c00 11-12,1021-1032,1057-1062
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "7f5fd03f068ba064a11f0eaa694a62fa53aaad59",
+  "prompts": {},
+  "sessions": {
+    "s_494438b44b9e5c": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "72812374-9fa8-4ff5-909a-110ac9a87421",
+        "model": "default"
+      },
+      "human_author": "jser <87244899@qq.com>"
+    }
+  }
+}
