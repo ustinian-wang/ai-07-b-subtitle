@@ -54,7 +54,8 @@ async def sse_chat_stream(
 ) -> AsyncIterator[str]:
     """
     通用 Agent 流水线：load ctx → Pipeline.run → map events to SSE JSON。
-    API 契约不变：delta / tool_start / tool_end / done / error。
+    API 契约：delta / tool_start / tool_end / done / error；可选 phase（routing/planning/executing）。
+    Pipeline 在首个 LLM 调用前即 yield phase，保证连接建立后 ~100ms 内有首包。
     """
     user_message = (message or "").strip()
     ref_ids = [x for x in (reference_record_ids or []) if x]
