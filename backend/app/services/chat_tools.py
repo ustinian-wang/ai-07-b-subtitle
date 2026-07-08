@@ -1,10 +1,11 @@
-"""对话助手内置工具：OpenAI function 定义 + 按分类执行。"""
+"""对话助手内置工具：薄封装，实际注册在 NoteLibraryPlugin + ToolRegistry。"""
 from __future__ import annotations
 
 import json
 import re
 from typing import Any
 
+from app.runtime.tool_registry import TOOL_CATEGORIES, ToolRegistry, ToolSpec
 from app.services.bilibili import BilibiliError, fetch_subtitles, format_subtitle_text, parse_bilibili_ref
 from app.services.folder_store import (
     UNCATEGORIZED_FOLDER_ID,
@@ -31,14 +32,6 @@ from app.services.subtitle_store import (
 )
 from app.services.xiaohongshu import XhsError, fetch_note, format_note_text, parse_xhs_ref
 
-# 操作分类（前端目录按 order 排序）
-TOOL_CATEGORIES: dict[str, dict[str, Any]] = {
-    "library": {"label": "笔记库", "order": 1},
-    "folder": {"label": "分类", "order": 2},
-    "extract": {"label": "提取", "order": 3},
-    "manage": {"label": "管理", "order": 4},
-}
-
 _TOOL_META: dict[str, dict[str, str]] = {
     "list_records": {"category": "library", "label": "列出笔记"},
     "get_record": {"category": "library", "label": "读取笔记详情"},
@@ -51,12 +44,25 @@ _TOOL_META: dict[str, dict[str, str]] = {
 }
 
 
+_registry: ToolRegistry | None = None
+
+
+def get_registry() -> ToolRegistry:
+    global _registry
+    if _registry is None:
+        from app.runtime.plugins.note_library import NoteLibraryPlugin
+
+        _registry = ToolRegistry()
+        NoteLibraryPlugin().register_tools(_registry)
+    return _registry
+
+
 def tool_category(name: str) -> str:
-    return _TOOL_META.get(name, {}).get("category") or "library"
+    return get_registry().tool_category(name)
 
 
 def tool_label(name: str) -> str:
-    return _TOOL_META.get(name, {}).get("label") or name
+    return get_registry().tool_label(name)
 
 
 def _record_id(args: dict[str, Any]) -> str:
@@ -160,9 +166,8 @@ def _resolve_folder_target(args: dict[str, Any]) -> tuple[str | None, str | None
     return None, f"文件夹不存在: {fid}"
 
 
-def get_openai_tools(*, intent: str | None = None) -> list[dict[str, Any]]:
-    """返回 OpenAI tools；write 分类仅暴露 folder 变更工具，避免误调 get_record。"""
-    specs: list[tuple[str, str, dict[str, Any]]] = [
+def _tool_spec_defs() -> list[tuple[str, str, dict[str, Any]]]:
+    return [
         (
             "list_records",
             "列出本地笔记摘要；可按文件夹/关键词过滤。需正文时用 include_text=true，避免逐条 get_record。",
@@ -326,41 +331,50 @@ def get_openai_tools(*, intent: str | None = None) -> list[dict[str, Any]]:
             },
         ),
     ]
-    all_tools = [
-        {
-            "type": "function",
-            "function": {"name": name, "description": desc, "parameters": params},
-        }
-        for name, desc, params in specs
-    ]
-    if intent == "write":
-        # ponytail: 分类 mutate 预分析已含 id/folder_id，勿再 list/get 正文
-        allowed = {"list_folders", "create_folder", "move_records"}
-        return [t for t in all_tools if t["function"]["name"] in allowed]
-    if intent == "query":
-        allowed = {"list_folders", "list_records", "get_record"}
-        return [t for t in all_tools if t["function"]["name"] in allowed]
-    return all_tools
+
+
+_HANDLERS = {
+    "list_records": lambda a: _list_records(a),
+    "get_record": lambda a: _get_record(a),
+    "list_folders": lambda a: _list_folders(a),
+    "create_folder": lambda a: _create_folder(a),
+    "move_records": lambda a: _move_records(a),
+    "extract_note": lambda a: _extract_note(a),
+    "delete_records": lambda a: _delete_records(a),
+    "export_records": lambda a: _export_records(a),
+}
+
+_SIDE_EFFECT = frozenset(
+    {"create_folder", "move_records", "extract_note", "delete_records", "export_records"}
+)
+
+
+def build_tool_specs() -> list[ToolSpec]:
+    specs: list[ToolSpec] = []
+    for name, desc, params in _tool_spec_defs():
+        meta = _TOOL_META.get(name, {})
+        handler = _HANDLERS[name]
+        specs.append(
+            ToolSpec(
+                name=name,
+                description=desc,
+                parameters=params,
+                handler=handler,
+                category=meta.get("category") or "library",
+                label=meta.get("label") or name,
+                side_effect=name in _SIDE_EFFECT,
+            )
+        )
+    return specs
+
+
+def get_openai_tools(*, intent: str | None = None) -> list[dict[str, Any]]:
+    """返回 OpenAI tools；write/query 按 intent 收窄。"""
+    return get_registry().get_openai_tools(intent=intent)
 
 
 def execute(name: str, arguments: dict[str, Any]) -> str:
-    handlers = {
-        "list_records": _list_records,
-        "get_record": _get_record,
-        "list_folders": _list_folders,
-        "create_folder": _create_folder,
-        "move_records": _move_records,
-        "extract_note": _extract_note,
-        "delete_records": _delete_records,
-        "export_records": _export_records,
-    }
-    fn = handlers.get(name)
-    if not fn:
-        return json.dumps({"ok": False, "error": f"未知工具: {name}"}, ensure_ascii=False)
-    try:
-        return fn(arguments or {})
-    except Exception as err:  # noqa: BLE001
-        return json.dumps({"ok": False, "error": str(err)}, ensure_ascii=False)
+    return get_registry().execute(name, arguments)
 
 
 def _truncate_text(text: str, limit: int = 4000) -> str:
