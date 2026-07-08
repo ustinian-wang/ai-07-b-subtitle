@@ -1,0 +1,22 @@
+frontend/src/mentionSearch.js
+  s_494438b44b9e5c::t_90d23056d6e65a 4,17-44,46,49,52-80,82-88,94-117
+frontend/src/ChatPanel.vue
+  s_494438b44b9e5c::t_dfa2737f169917 260
+  s_494438b44b9e5c::t_5a960fd944281b 318-326
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "997e17ea831c2cc065278d15560e1a26aeb9bbfe",
+  "prompts": {},
+  "sessions": {
+    "s_494438b44b9e5c": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "72812374-9fa8-4ff5-909a-110ac9a87421",
+        "model": "default"
+      },
+      "human_author": "jser <87244899@qq.com>"
+    }
+  }
+}
