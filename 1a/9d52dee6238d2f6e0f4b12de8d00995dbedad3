@@ -1,0 +1,25 @@
+frontend/src/SettingsPage.vue
+  s_9d13d4e36c80d3::t_4964d17895823e 105
+  s_9d13d4e36c80d3::t_e330ec0ddbf71c 106-147
+  s_9d13d4e36c80d3::t_ee9e05ba5337d9 301-304,308
+  s_9d13d4e36c80d3::t_1c1e361b444c97 197-203
+  s_9d13d4e36c80d3::t_e682907c5a054d 186-189
+  s_9d13d4e36c80d3::t_06fd947d8deab4 240-243
+  s_9d13d4e36c80d3::t_f198c8bd3c9828 272-275
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "1a9d52dee6238d2f6e0f4b12de8d00995dbedad3",
+  "prompts": {},
+  "sessions": {
+    "s_9d13d4e36c80d3": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "67eff870-af66-4b83-91bf-d3f99f2eb546",
+        "model": "default"
+      },
+      "human_author": "jser <87244899@qq.com>"
+    }
+  }
+}
