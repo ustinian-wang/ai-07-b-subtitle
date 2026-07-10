@@ -1,0 +1,26 @@
+backend/app/services/subtitle_store.py
+  s_b0b57399dd466f::t_3cca2b3b3aaacf 183-185
+backend/app/services/notion_sync.py
+  s_b0b57399dd466f::t_75834c865e6f22 1-295
+backend/app/api/v1/subtitle.py
+  s_b0b57399dd466f::t_89c7b048b320f2 38-39
+  s_b0b57399dd466f::t_fbefae2a16af1e 16-19
+  s_b0b57399dd466f::t_84c1dbeaa932a3 384-396
+  s_b0b57399dd466f::t_075e721a66634b 397-398
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "67bff5e3be450880c933d101386deae63ffe2c82",
+  "prompts": {},
+  "sessions": {
+    "s_b0b57399dd466f": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "0de7578a-6f06-4cd3-b173-b2a968608aa4",
+        "model": "default"
+      },
+      "human_author": "jser <87244899@qq.com>"
+    }
+  }
+}
