@@ -103,6 +103,49 @@
     </section>
 
     <section class="panel">
+      <h2 class="section-title">Notion 同步</h2>
+      <p class="hint">
+        在
+        <a href="https://www.notion.so/my-integrations" target="_blank" rel="noopener">Notion</a>
+        创建 Internal Integration，将父页面分享给该集成，填写 Integration Token 与父页面 ID（URL 中
+        32 位 hex，可带或不带连字符）。
+      </p>
+
+      <p v-if="notionConfigured" class="status ok">
+        当前已配置 Token：<code>{{ notionMasked }}</code>
+        · 父页面 <code>{{ notionParentIdDisplay }}</code>
+      </p>
+      <p v-else class="status warn">尚未配置 Notion（需 Token 与父页面 ID）</p>
+
+      <label class="label" for="notion-token">NOTION TOKEN</label>
+      <input
+        id="notion-token"
+        v-model="notionToken"
+        class="input"
+        type="password"
+        autocomplete="off"
+        placeholder="secret_…，留空不修改"
+      />
+
+      <label class="label" for="notion-parent">NOTION PARENT PAGE ID</label>
+      <input
+        id="notion-parent"
+        v-model="notionParentId"
+        class="input"
+        type="text"
+        autocomplete="off"
+        placeholder="父页面 ID，留空并保存可清除"
+      />
+
+      <div class="toolbar">
+        <button class="btn primary" :disabled="saving" @click="save">
+          {{ saving ? '保存中…' : '保存' }}
+        </button>
+        <span v-if="tip" :class="['tip', tipOk ? 'ok' : 'err']">{{ tip }}</span>
+      </div>
+    </section>
+
+    <section class="panel">
       <h2 class="section-title">对话助手工具</h2>
       <p class="hint">模型可通过以下工具操作本地笔记库，按分类组织。</p>
       <p v-if="toolsLoading" class="status">加载工具目录…</p>
@@ -140,12 +183,23 @@ export default {
       xhsMasked: '',
       openaiConfigured: false,
       openaiMasked: '',
+      notionToken: '',
+      notionParentId: '',
+      notionConfigured: false,
+      notionMasked: '',
       saving: false,
       tip: '',
       tipOk: true,
       toolsLoading: false,
       toolCategories: [],
     };
+  },
+  computed: {
+    notionParentIdDisplay() {
+      const id = (this.notionParentId || '').trim();
+      if (!id) return '—';
+      return id.length > 12 ? `${id.slice(0, 8)}…${id.slice(-4)}` : id;
+    },
   },
   mounted() {
     this.load();
@@ -183,6 +237,10 @@ export default {
         this.openaiMasked = data.openai_api_key_masked || '';
         this.openaiBaseUrl = data.openai_base_url || 'https://api.openai.com/v1';
         this.openaiModel = data.openai_model || 'gpt-4o-mini';
+        this.notionConfigured =
+          !!data.notion_token_configured && !!(data.notion_parent_id || '').trim();
+        this.notionMasked = data.notion_token_masked || '';
+        this.notionParentId = data.notion_parent_id || '';
       } catch {
         /* ignore */
       }
@@ -211,6 +269,10 @@ export default {
         if (this.openaiApiKey !== '') body.openai_api_key = this.openaiApiKey;
         body.openai_base_url = (this.openaiBaseUrl || '').trim();
         body.openai_model = (this.openaiModel || '').trim();
+        if (this.notionToken !== '') body.notion_token = this.notionToken;
+        if (this.notionParentId !== '' || this.notionConfigured) {
+          body.notion_parent_id = (this.notionParentId || '').trim();
+        }
         if (!Object.keys(body).length) {
           this.tip = '请填写要更新的配置项';
           this.tipOk = false;
@@ -236,9 +298,14 @@ export default {
         this.openaiMasked = data.openai_api_key_masked || '';
         this.openaiBaseUrl = data.openai_base_url || 'https://api.openai.com/v1';
         this.openaiModel = data.openai_model || 'gpt-4o-mini';
+        this.notionConfigured =
+          !!data.notion_token_configured && !!(data.notion_parent_id || '').trim();
+        this.notionMasked = data.notion_token_masked || '';
+        this.notionParentId = data.notion_parent_id || '';
         this.sessdata = '';
         this.xhsCookie = '';
         this.openaiApiKey = '';
+        this.notionToken = '';
         this.tip = '已保存';
         this.tipOk = true;
       } catch (e) {
