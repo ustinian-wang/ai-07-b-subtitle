@@ -1,0 +1,69 @@
+frontend/src/CreateFolderDialog.vue
+  s_132439e084ecda::t_2cdbec390d85e5 35
+  s_132439e084ecda::t_6a1af1dbbdbb5d 59
+  s_132439e084ecda::t_0ab8168b3ac196 1-34,36-58,60-96,100-267
+  s_132439e084ecda::t_b550e8ae7b8218 97-99
+frontend/src/TreeFolder.vue
+  s_132439e084ecda::t_9d1c5df142f48f 216-218
+  s_132439e084ecda::t_b7f5b825298435 59
+  s_132439e084ecda::t_09788d0962c9b8 90
+  s_132439e084ecda::t_c8276f9daf4feb 150-153,163,171
+  s_132439e084ecda::t_90f63ef2a56234 101
+  s_132439e084ecda::t_8fd5270c467c76 159
+  s_132439e084ecda::t_9ddb416e239b46 115
+  s_132439e084ecda::t_0ac70240fe1a7a 47
+  s_132439e084ecda::t_f37112b8072942 82
+  s_132439e084ecda::t_0e95bf5b2cd16c 9
+frontend/src/App.vue
+  s_132439e084ecda::t_04d06dc63d7067 22
+  s_132439e084ecda::t_f3c5df9c530055 786
+  s_132439e084ecda::t_ec811eb05042e4 272
+  s_132439e084ecda::t_5cf7caa01d624c 274
+  s_132439e084ecda::t_9cf165087a39ce 725-735,741,745-769
+  s_132439e084ecda::t_8a819870a5c281 252-257,259-261
+  s_132439e084ecda::t_406e97f91a110c 822-826
+  s_132439e084ecda::t_312082fd2bbc4a 83,95
+  s_132439e084ecda::t_3f7a5cb6b5bcb0 258
+  s_132439e084ecda::t_2d818e418645f5 288-289
+  s_132439e084ecda::t_d5f2ccdfc85687 305-308,310
+  s_132439e084ecda::t_025b7181a0ee89 862,868,873,883
+  s_132439e084ecda::t_14c29429f868ff 300
+  s_132439e084ecda::t_3816b8d16ba6d2 770,860-861,863-867,869-872,874,879,888,891,895-896
+  s_132439e084ecda::t_8563e759055cdb 432-436,438
+  s_132439e084ecda::t_3f6615992d0dee 841
+  s_132439e084ecda::t_f5aa93685270fa 666-669,672
+  s_132439e084ecda::t_9074469edbb745 509-547
+  s_132439e084ecda::t_937f1143193617 271,278
+  s_132439e084ecda::t_9980f7c6d5df65 309
+  s_132439e084ecda::t_1928bc74a19c9f 686-708,710,712
+  s_132439e084ecda::t_e4f778a6e6ed45 894
+  s_132439e084ecda::t_e601ee4b1439cb 273
+frontend/src/dragMime.js
+  s_132439e084ecda::t_705eb6902455aa 3,7-20
+frontend/src/LibraryTree.vue
+  s_132439e084ecda::t_0e5292aa300087 171-183
+  s_132439e084ecda::t_5d288d2d3ce023 95
+  s_132439e084ecda::t_0c1ff33f1391e0 156
+  s_132439e084ecda::t_f5add3786d5354 9,16-19
+  s_132439e084ecda::t_6754a876266c0a 107
+  s_132439e084ecda::t_264df67fc5f541 127-128
+  s_132439e084ecda::t_81410647e9cfde 234
+  s_132439e084ecda::t_8f040bc0b8a7e1 142
+  s_132439e084ecda::t_73d57e345b871f 242
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "65eacaac6386252a8f4cfccfd5a1da6013c585eb",
+  "prompts": {},
+  "sessions": {
+    "s_132439e084ecda": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "c97798b5-d8a1-44f3-b960-6b27b2556921",
+        "model": "default"
+      },
+      "human_author": "jser <87244899@qq.com>"
+    }
+  }
+}
