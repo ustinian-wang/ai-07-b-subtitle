@@ -1,256 +1,95 @@
 # ai-07-b-subtitle
 
-**多平台笔记提取与管理**教学沙箱（B 站字幕 + 小红书笔记 + 对话助手）。粘贴链接 → 自动识别平台 → 提取笔记 → 本地 JSON **笔记库** → 目录树管理 → 右侧 LLM 对话分析（FastAPI + httpx + Vue 3 + Vite）。
+**多平台笔记提取与管理**：粘贴 B 站 / 小红书链接 → 本地笔记库 → 对话分析 / 同步 Notion。
 
-> 仓库目录名保留 `b-subtitle` 历史命名；API 路径前缀仍为 `/api/v1/subtitle`（兼容旧接口），实际存储 B 站与小红书等多种来源笔记。
+> 目录名保留 `b-subtitle` 历史命名；API 前缀仍为 `/api/v1/subtitle`。本仓库为 **独立 Git 项目**，可单独 clone / push。
 
-> 本目录为 **独立 Git 仓库**，可在 monorepo 的 `projects/` 下单独 clone / push，与 `ai-01-chat` 等家族项目结构对齐。共性约定见 monorepo 根目录 [`docs/ai-projects-family.md`](../../docs/ai-projects-family.md)（若仅 clone 本子仓，可忽略该链接）。
+## 5 分钟上手
 
-## 功能
+### 环境要求
 
-- **B 站**：`bilibili.com/video/BV…`、`av…`、`b23.tv` / `bili2233.cn` 短链；多分 P；自动优先中文字幕轨
-- **小红书**：`xiaohongshu.com/explore/…`、`xhslink.com` 短链（标题/正文/标签/图片）
-- 粘贴链接**自动识别平台**（B 站 / 小红书）
-- **提取后自动保存**到本地笔记库（`backend/data/subtitles/*.json`，历史目录名）
-- **去重**：B 站按 `bvid + page + 字幕轨`；小红书按 `note_id`；重复时提示查看已有或 `force` 重拉
-- **笔记库侧栏**：目录树（未分类置顶）、来源标签（B站 / 小红书）、批量移动/导出/删除
-- **右侧对话助手**：SSE 流式对话、会话列表与持久化；**@ 引用** / **拖拽**库内笔记作为上下文
-- **设置页**：B 站 **SESSDATA**、小红书 **Cookie**、**OpenAI/GPT** 对话配置
-- **开发热更**：`pm2 start ecosystem.config.cjs`（uvicorn `--reload` + Vite HMR）
+- **Python ≥ 3.10**、**Node.js ≥ 18**
+- 可选：**pm2**（推荐，一键启停 + 热更）
 
-## 目录结构
-
-```
-ai-07-b-subtitle/
-├── backend/
-│   ├── app/
-│   │   ├── api/v1/          # subtitle、settings、chat 路由
-│   │   ├── services/        # bilibili/xiaohongshu 抓取、subtitle_store、chat_store
-│   │   └── models/          # Pydantic schemas
-│   ├── data/                # 本地数据（.gitignore，不入库）
-│   │   ├── subtitles/       # 笔记 *.json（B站/小红书等）
-│   │   ├── folders.json     # 文件夹树
-│   │   ├── chat_sessions/   # 对话会话 *.json
-│   │   └── settings.json    # SESSDATA、Cookie、OpenAI 等
-│   ├── .env.example
-│   └── requirements.txt
-├── frontend/
-│   ├── src/App.vue          # 主界面 + 笔记库侧栏 + 对话面板
-│   ├── src/ChatPanel.vue    # 右侧对话助手
-│   └── src/SettingsPage.vue # 设置页
-├── ecosystem.config.cjs     # pm2 启停（backend + frontend）
-└── README.md
-```
-
-## 开发
-
-### 一键启停（pm2）
+### 1. 启动
 
 ```bash
-cd projects/ai-07-b-subtitle   # 或 clone 后的项目根目录
-pm2 start ecosystem.config.cjs    # 后台 + 热更
-pm2 status                        # 查看状态
-pm2 logs                          # 查看日志
-pm2 restart ecosystem.config.cjs  # 重启
-pm2 stop ecosystem.config.cjs     # 停止
-pm2 delete ecosystem.config.cjs   # 从 pm2 列表移除
-```
+# 在项目根目录执行
 
-### 手动启动
+# 方式 A：pm2（推荐）
+pm2 start ecosystem.config.cjs
 
-```bash
-cd backend
-python3 -m venv .venv && source .venv/bin/activate
+# 方式 B：手动
+cd backend && python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 uvicorn app.main:app --host 0.0.0.0 --port 8907 --reload --reload-dir app
-
-cd ../frontend
-npm install && npm run dev -- --host 0.0.0.0 --port 9177
+# 新终端
+cd frontend && npm install && npm run dev -- --host 0.0.0.0 --port 9177
 ```
 
-| 项 | 默认值 |
-|----|--------|
-| 后端地址 | http://localhost:8907 |
-| 前端地址 | http://localhost:9177 |
-| 健康检查 | `GET /api/health` |
-| 热更 | 后端 `backend/app/`；前端 Vite HMR |
+### 2. 打开页面
+
+| 地址 | 说明 |
+|------|------|
+| http://localhost:9177 | 前端（笔记库 + 提取 + 对话） |
+| http://localhost:8907/api/health | 后端健康检查 |
+
+### 3. 第一次提取
+
+1. 在中间输入框粘贴 B 站 BV 链接或小红书链接
+2. 点 **提取** → 成功后自动保存到左侧笔记库
+3. 点击侧栏笔记可查看全文；右侧可开对话（需先配 LLM，见下）
+
+```bash
+curl http://localhost:8907/api/health
+# {"ok":true,"project":"ai-07-b-subtitle",...}
+```
+
+## 按需配置（不必一次配齐）
+
+进入左下角 **设置**，按你需要的能力逐项填写：
+
+| 你想用… | 要配什么 | 不配会怎样 |
+|---------|----------|------------|
+| B 站需登录字幕 | `SESSDATA` | 部分视频提示需登录 |
+| 小红书笔记 | 小红书 Cookie | 抓取失败 |
+| 右侧对话助手 | OpenAI API Key + Base URL + Model | 对话不可用 |
+| 同步 Notion | Integration Token + 父页面 ID | 「同步 Notion」报未配置 |
+
+配置写入 `backend/data/settings.json`（不入 Git）。也可用 `backend/.env` 作 fallback，见 [配置说明](docs/configuration.md)。
+
+## 常见使用场景
+
+| 场景 | 怎么做 | 详情 |
+|------|--------|------|
+| 网页粘贴链接提取 | 首页输入 URL → 提取 | [使用指南 · 提取笔记](docs/user-guide.md#提取笔记) |
+| 管理文件夹 / 批量导出 | 左侧笔记库 | [使用指南 · 笔记库](docs/user-guide.md#笔记库) |
+| @ 引用笔记对话 | 右侧对话区输入 `@` 或拖拽笔记 | [使用指南 · 对话助手](docs/user-guide.md#对话助手) |
+| 同步到 Notion | 详情或批量栏点「同步 Notion」 | [使用指南 · Notion](docs/user-guide.md#同步-notion) |
+| B 站页一键导入 | 安装 Chrome 扩展 **chromematools** | [使用指南 · Chrome 扩展](docs/user-guide.md#chrome-扩展-b-站一键导入) |
+
+## 文档索引
+
+| 文档 | 适合谁 |
+|------|--------|
+| [**使用指南**](docs/user-guide.md) | 新用户：完整操作流程与界面说明 |
+| [**配置说明**](docs/configuration.md) | 配 Cookie、LLM、Notion 的逐步说明 |
+| [**API 参考**](docs/api.md) | 联调、脚本调用、接口字段 |
+| [**开发说明**](docs/development.md) | 改代码：目录结构、自检、测试、Git |
+
+## 功能一览
+
+- B 站字幕 / 小红书笔记提取，自动去重与落盘
+- 目录树笔记库（文件夹、拖拽、批量操作）
+- Notion 按标题同步（同名覆盖）
+- LLM 对话（@ / 拖拽引用笔记）
+- Chrome 扩展 **chromematools** 从 B 站页导入（见 [使用指南](docs/user-guide.md#chrome-扩展-b-站一键导入)）
+
+## 端口与命令速查
+
+| 项 | 默认 |
+|----|------|
+| 前端 | 9177 |
+| 后端 | 8907 |
+| 启停 | `pm2 start/stop/restart ecosystem.config.cjs` |
 | 日志 | `pm2 logs` |
-
-## 配置：B 站 SESSDATA
-
-大量 B 站视频的字幕接口返回 `need_login_subtitle=true`，需登录 Cookie 才能拉取 CC / AI 字幕。
-
-**推荐**：浏览器打开前端 → 右上角 **设置** → 粘贴 `SESSDATA` → 保存。
-
-| 方式 | 说明 |
-|------|------|
-| **UI 设置页** | B 站 `SESSDATA`、小红书 Cookie、OpenAI `api_key` / `base_url` / `model` → `backend/data/settings.json`（密钥 GET 脱敏） |
-| **环境变量 fallback** | `BILIBILI_SESSDATA`、`XIAOHONGSHU_COOKIE`、`OPENAI_API_KEY`、`OPENAI_BASE_URL`、`OPENAI_MODEL` |
-
-获取 Cookie：浏览器登录对应站点 → F12 → Application → Cookies。
-
-## 配置：对话 LLM（OpenAI 兼容）
-
-右侧对话助手需 OpenAI 兼容 API。
-
-**推荐**：浏览器打开前端 → 右上角 **设置** → 填写 **API Key**、**Base URL**、**Model** → 保存。
-
-| 方式 | 说明 |
-|------|------|
-| **UI 设置页** | `openai_api_key`（脱敏）、`openai_base_url`、`openai_model` → `settings.json` |
-| **环境变量 fallback** | `OPENAI_API_KEY`、`OPENAI_BASE_URL`、`OPENAI_MODEL` |
-
-| 字段 | 说明 | 默认 |
-|------|------|------|
-| `openai_api_key` | API Key（必填） | — |
-| `openai_base_url` | 兼容端点 | `https://api.openai.com/v1` |
-| `openai_model` | 模型名 | `gpt-4o-mini` |
-
-本地已有 `ai-03-writemd`、`ai-06-req-agent` 等兄弟项目的 `backend/.env` 时，可复制其中 `OPENAI_*` 到本项目的 `.env` 或设置页（勿提交密钥）。详见 `backend/.env.example` 注释。
-
-引用库内笔记时，后端会把对应 `text` 注入 system prompt（单条最多 12000 字符）。
-
-## 主要 API
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | `/api/health` | 健康检查 |
-| POST | `/api/v1/subtitle/extract` | 提取笔记（自动识别 B 站 / 小红书）；body 见下 |
-| POST | `/api/v1/subtitle/save` | 手动保存（一般无需，提取已自动落盘） |
-| GET | `/api/v1/subtitle/tree` | 笔记库目录树（文件夹 + 未分类） |
-| POST | `/api/v1/subtitle/folders` | 新建文件夹，`{"name":"…","parent_id":null}` |
-| PATCH | `/api/v1/subtitle/folders/{id}` | 重命名或移动文件夹 |
-| DELETE | `/api/v1/subtitle/folders/{id}` | 删除文件夹（笔记移至上级/未分类） |
-| POST | `/api/v1/subtitle/records/batch-move` | 批量移动，`{"ids":[…],"folder_id":null}` |
-| GET | `/api/v1/subtitle/records` | 笔记库列表（扁平，摘要） |
-| GET | `/api/v1/subtitle/records/{id}` | 单条笔记详情 |
-| DELETE | `/api/v1/subtitle/records/{id}` | 删除一条 |
-| POST | `/api/v1/subtitle/records/batch-delete` | 批量删除，`{"ids":["id1","id2"]}` |
-| POST | `/api/v1/subtitle/records/batch-export` | 批量导出，`{"ids":[...],"format":"txt"\|"json"}` |
-| GET | `/api/v1/settings` | 读取设置（密钥脱敏） |
-| PATCH | `/api/v1/settings` | 更新设置，如 `{"openai_api_key":"…","openai_base_url":"…","openai_model":"…"}` |
-| POST | `/api/v1/chat/sessions` | 新建对话会话，返回 `thread_id` |
-| GET | `/api/v1/chat/sessions` | 会话列表（标题、条数、更新时间，仅含已有消息） |
-| DELETE | `/api/v1/chat/sessions/{thread_id}` | 删除会话及全部记录 |
-| GET | `/api/v1/chat/messages?thread_id=…` | 读取会话历史 |
-| DELETE | `/api/v1/chat/messages?thread_id=…` | 清空会话 |
-| POST | `/api/v1/chat/stream` | SSE 流式对话，见下 |
-
-### 提取 `POST /api/v1/subtitle/extract`
-
-B 站示例：
-
-```json
-{
-  "url": "https://www.bilibili.com/video/BV1Eb411u7Fw",
-  "page": 1,
-  "lang": null,
-  "force": false,
-  "folder_id": null
-}
-```
-
-小红书示例：
-
-```json
-{
-  "url": "https://www.xiaohongshu.com/explore/656abc...?xsec_token=...",
-  "force": false,
-  "folder_id": null
-}
-```
-
-响应含 `source`（`bilibili` / `xiaohongshu`）。小红书额外字段：`note_id`、`note_type`、`tags`、`images`、`author`。
-
-| 字段 | 说明 |
-|------|------|
-| `url` | 链接（B 站 BV/av/短链，或小红书 explore/xhslink） |
-| `page` | B 站分 P 序号，默认 1 |
-| `lang` | 可选，B 站优先字幕语言，如 `zh-CN` |
-| `force` | `true` 时忽略本地去重，重新请求上游并 upsert |
-| `folder_id` | 可选，保存到指定文件夹；省略或 `null` 为未分类（前端提取默认未分类） |
-
-**去重命中**时返回 `duplicate: true`、`existing_record_id`，不重复抓取；前端提示「直接查看」或「重新提取」。
-
-**成功提取**时自动 upsert 到 `data/subtitles/`，响应含 `record_id`、`text`（B 站含带时间轴 `lines`，小红书含 `tags`/`images` 等）。
-
-### 对话 `POST /api/v1/chat/stream`
-
-```json
-{
-  "thread_id": "abc123",
-  "message": "总结这篇笔记的要点",
-  "reference_record_ids": ["record_id_1", "record_id_2"]
-}
-```
-
-SSE 响应：`data: {"delta":"…"}` 流式片段 → `data: {"done":true}` 结束；错误时 `data: {"error":"…"}`。
-
-## 数据持久化
-
-| 路径 | 内容 |
-|------|------|
-| `backend/data/subtitles/{id}.json` | 单条笔记：`source`（`bilibili` / `xiaohongshu`）、title、lines/text、**folder_id** 等 |
-| `backend/data/folders.json` | 文件夹树：`{ id, name, parent_id }` |
-| `backend/data/chat_sessions/{thread_id}.json` | 对话历史 |
-| `backend/data/settings.json` | 应用设置（`bilibili_sessdata`、`xiaohongshu_cookie`、`openai_*` 等） |
-
-- **去重键**：B 站 `{bvid}_p{page}_{lan}`；小红书 `xhs_{note_id}`
-- **本地数据不入 Git**：`backend/data/`、`.run/` 已在 `.gitignore`
-
-## 技术说明
-
-- **B 站 / 小红书抓取**：`httpx` 调 Web API（小红书：edith feed + `__INITIAL_STATE__` 回退）
-- **对话**：OpenAI 兼容 SSE，`reference_record_ids` 注入库内笔记
-- **WBI 签名**：player 接口需 nav 接口提供的 img/sub key 签名
-- **代理**：前端 Vite 将 `/api` 代理到 `http://127.0.0.1:8907`（见 `frontend/vite.config.js`）
-
-## Agent Runtime 与插件
-
-对话助手采用 **通用内核 + 领域插件** 架构（`backend/app/runtime/`）：
-
-| 模块 | 职责 |
-|------|------|
-| `runtime/context.py` | `RunContext`：thread_id、引用、history、registry |
-| `runtime/events.py` + `sse.py` | `StepEvent` 与 SSE 适配分离 |
-| `runtime/pipeline.py` | `Pipeline.run(ctx)`：Router → Planner → Confirm? → Executor |
-| `runtime/task_state.py` | `TaskState` FSM：idle → planning → awaiting_confirmation → executing → done |
-| `runtime/tool_registry.py` | `ToolSpec` / `ToolRegistry` |
-| `runtime/plugins/note_library.py` | 笔记库插件：工具、引用注入、分类预分析、参数修复 |
-
-**扩展新插件**：实现 `RuntimePlugin`（`register_tools`、`system_prompt`、`build_reference_context` 等），注册到 `Pipeline(plugins=[...])` 即可；`chat_stream.py` 仅负责组装 `RunContext` 并映射 SSE。
-
-```bash
-python -m app.runtime.pipeline
-python -m app.runtime.plugins.note_library
-python -m app.services.agent.router
-python -m app.services.agent.planner
-python -m app.services.chat_task_state
-python -m app.services.chat_classify_plan
-```
-
-## 自检
-
-```bash
-cd backend && source .venv/bin/activate
-python -m app.services.bilibili      # URL 解析、时间格式
-python -m app.services.subtitle_store
-python -m app.services.chat_store
-python -m app.api.v1.subtitle        # TestClient 冒烟（含去重、批量导出）
-```
-
-## 独立仓库与 Git
-
-```bash
-# 在 projects/ai-07-b-subtitle 目录内
-git remote add origin <你的远程仓库 URL>
-git push -u origin main
-```
-
-- 由 monorepo 脚本生成时：`./scripts/add-ai-project.sh b-subtitle` → 目录名 `ai-07-b-subtitle`
-- 父 monorepo **不要**把子目录内的 `.git` 当普通文件夹提交
-
-## 相关文档
-
-- 家族项目对照与端口表：monorepo [`docs/ai-projects-family.md`](../../docs/ai-projects-family.md)
-- 新建同类沙箱：monorepo `scripts/add-ai-project.sh` 或 Cursor 命令 `/add-ai-project`
