@@ -95,10 +95,34 @@ def get_openai_model() -> str:
     return from_env or DEFAULT_OPENAI_MODEL
 
 
+def get_notion_token() -> str | None:
+    """优先 settings.json，fallback .env。"""
+    from_file = (load_settings().get("notion_token") or "").strip()
+    if from_file:
+        return from_file
+    from_env = os.getenv("NOTION_TOKEN", "").strip()
+    return from_env or None
+
+
+def get_notion_parent_id() -> str | None:
+    """优先 settings.json，fallback .env。"""
+    from_file = (load_settings().get("notion_parent_id") or "").strip()
+    if from_file:
+        return from_file
+    from_env = os.getenv("NOTION_PARENT_ID", "").strip()
+    return from_env or None
+
+
+def notion_configured() -> bool:
+    return bool(get_notion_token() and get_notion_parent_id())
+
+
 def public_settings() -> dict[str, Any]:
     bili = get_bilibili_sessdata() or ""
     xhs = get_xiaohongshu_cookie() or ""
     openai_key = get_openai_api_key() or ""
+    notion_token = get_notion_token() or ""
+    notion_parent_id = get_notion_parent_id() or ""
     return {
         "bilibili_sessdata_configured": bool(bili),
         "bilibili_sessdata_masked": mask_secret(bili),
@@ -108,6 +132,9 @@ def public_settings() -> dict[str, Any]:
         "openai_api_key_masked": mask_secret(openai_key),
         "openai_base_url": get_openai_base_url(),
         "openai_model": get_openai_model(),
+        "notion_token_configured": bool(notion_token),
+        "notion_token_masked": mask_secret(notion_token),
+        "notion_parent_id": notion_parent_id,
     }
 
 

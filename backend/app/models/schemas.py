@@ -167,6 +167,9 @@ class SettingsPublic(BaseModel):
     openai_api_key_masked: str = ""
     openai_base_url: str = "https://api.openai.com/v1"
     openai_model: str = "gpt-4o-mini"
+    notion_token_configured: bool = False
+    notion_token_masked: str = ""
+    notion_parent_id: str = ""
 
 
 class SettingsPatchRequest(BaseModel):
@@ -175,6 +178,30 @@ class SettingsPatchRequest(BaseModel):
     openai_api_key: str | None = None
     openai_base_url: str | None = None
     openai_model: str | None = None
+    notion_token: str | None = None
+    notion_parent_id: str | None = None
+
+
+class NotionSyncRequest(BaseModel):
+    ids: list[str] = Field(..., min_length=1)
+
+
+class NotionSyncItem(BaseModel):
+    id: str
+    notion_page_id: str
+    action: str = Field(..., pattern="^(created|updated)$")
+    title: str
+
+
+class NotionSyncFailedItem(BaseModel):
+    id: str
+    error: str
+
+
+class NotionSyncResponse(BaseModel):
+    ok: bool = True
+    synced: list[NotionSyncItem] = Field(default_factory=list)
+    failed: list[NotionSyncFailedItem] = Field(default_factory=list)
 
 
 class ChatRequest(BaseModel):

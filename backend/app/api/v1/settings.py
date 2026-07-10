@@ -27,6 +27,10 @@ def patch_settings(body: SettingsPatchRequest) -> SettingsPublic:
         patch["openai_base_url"] = (updates["openai_base_url"] or "").strip()
     if "openai_model" in updates:
         patch["openai_model"] = (updates["openai_model"] or "").strip()
+    if "notion_token" in updates:
+        patch["notion_token"] = (updates["notion_token"] or "").strip()
+    if "notion_parent_id" in updates:
+        patch["notion_parent_id"] = (updates["notion_parent_id"] or "").strip()
     if patch:
         settings_store.patch_settings(patch)
     return SettingsPublic.model_validate(settings_store.public_settings())
