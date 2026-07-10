@@ -1,6 +1,6 @@
 <template>
   <div class="app-shell">
-    <SettingsPage v-if="view === 'settings'" @back="view = 'main'" />
+    <SettingsPage v-if="view === 'settings'" @back="onSettingsBack" />
 
     <div
       v-else
@@ -45,6 +45,14 @@
           </button>
           <button class="btn tiny" :disabled="!selectedIds.length" @click="batchExport('json')">
             导出 json
+          </button>
+          <button
+            class="btn tiny"
+            :disabled="!selectedIds.length || notionSyncing"
+            :title="notionConfigured ? '' : '请先在设置配置 Notion'"
+            @click="syncToNotion(selectedIds)"
+          >
+            {{ notionSyncing ? '同步中…' : '同步 Notion' }}
           </button>
           <button
             class="btn tiny danger"
@@ -225,6 +233,14 @@
 
         <div class="toolbar">
           <button class="btn" @click="copyText">复制纯文本</button>
+          <button
+            class="btn"
+            :disabled="!result.record_id || notionSyncing"
+            :title="notionConfigured ? '' : '请先在设置配置 Notion'"
+            @click="syncToNotion([result.record_id])"
+          >
+            {{ notionSyncing ? '同步中…' : '同步到 Notion' }}
+          </button>
           <span v-if="copied" class="copied">已复制</span>
           <span v-if="savedTip" class="copied">{{ savedTip }}</span>
         </div>
@@ -298,6 +314,8 @@ export default {
       selectedIds: [],
       copied: false,
       savedTip: '',
+      notionSyncing: false,
+      notionConfigured: false,
       duplicatePrompt: null,
       sidebarWidth: 360,
       chatWidth: 400,
@@ -446,6 +464,7 @@ export default {
     this.loadSidebarWidth();
     this.loadChatWidth();
     this.loadTree();
+    this.loadNotionSettings();
     this._onWindowResize = () => {
       this.sidebarWidth = this.clampSidebarWidth(this.sidebarWidth);
       this.chatWidth = this.clampChatWidth(this.chatWidth);
@@ -1063,6 +1082,72 @@ export default {
         }, 2000);
       } catch (e) {
         this.error = '复制失败：' + String(e);
+      }
+    },
+    onSettingsBack() {
+      this.view = 'main';
+      this.loadNotionSettings();
+    },
+    async loadNotionSettings() {
+      try {
+        const resp = await fetch('/api/v1/settings');
+        const data = await resp.json();
+        if (!resp.ok) return;
+        this.notionConfigured =
+          !!data.notion_token_configured && !!(data.notion_parent_id || '').trim();
+      } catch {
+        /* ignore */
+      }
+    },
+    async syncToNotion(ids) {
+      const list = (ids || []).filter(Boolean);
+      if (!list.length || this.notionSyncing) return;
+      this.notionSyncing = true;
+      this.savedTip = '';
+      this.error = '';
+      try {
+        const resp = await fetch('/api/v1/subtitle/records/batch-sync-notion', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ids: list }),
+        });
+        const data = await resp.json();
+        if (resp.status === 400) {
+          const msg = data.detail || '请先在设置页配置 Notion';
+          this.savedTip = msg;
+          setTimeout(() => {
+            if (this.savedTip === msg) this.savedTip = '';
+          }, 3000);
+          return;
+        }
+        if (!resp.ok) {
+          this.error = data.detail || data.message || '同步 Notion 失败';
+          return;
+        }
+        const synced = data.synced || [];
+        const failed = data.failed || [];
+        if (failed.length) {
+          const errMsg = failed[0].error || '未知错误';
+          if (synced.length) {
+            this.savedTip = `成功 ${synced.length} 条，失败 ${failed.length} 条：${errMsg}`;
+          } else {
+            this.error = errMsg;
+          }
+        } else if (synced.length) {
+          this.savedTip = `已同步 ${synced.length} 条到 Notion`;
+        } else {
+          this.savedTip = '同步完成';
+        }
+        if (this.savedTip) {
+          const tip = this.savedTip;
+          setTimeout(() => {
+            if (this.savedTip === tip) this.savedTip = '';
+          }, 3000);
+        }
+      } catch (e) {
+        this.error = String(e);
+      } finally {
+        this.notionSyncing = false;
       }
     },
   },
