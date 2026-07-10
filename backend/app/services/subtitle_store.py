@@ -180,6 +180,9 @@ def save_record(payload: dict[str, Any]) -> dict[str, Any]:
         "created_at": payload.get("created_at") or (existing or {}).get("created_at") or now,
         "updated_at": now,
     }
+    for key in ("notion_page_id", "notion_synced_at"):
+        if merged.get(key):
+            record[key] = merged[key]
     _record_path(record_id).write_text(
         json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8"
     )

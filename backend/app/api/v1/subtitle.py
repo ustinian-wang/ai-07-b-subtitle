@@ -13,6 +13,10 @@ from app.models.schemas import (
     FolderPublic,
     FolderUpdateRequest,
     LibraryTreeResponse,
+    NotionSyncFailedItem,
+    NotionSyncItem,
+    NotionSyncRequest,
+    NotionSyncResponse,
     SubtitleExtractRequest,
     SubtitleExtractResponse,
     SubtitleLine,
@@ -31,6 +35,8 @@ from app.services.folder_store import (
     update_folder,
 )
 from app.services.platform import detect_platform
+from app.services.notion_sync import batch_sync_records
+from app.services import settings_store
 from app.services.subtitle_store import (
     build_library_tree,
     delete_records,
@@ -373,6 +379,21 @@ def batch_delete_records(body: BatchIdsRequest) -> BatchDeleteResponse:
 def batch_export_records(body: BatchExportRequest) -> BatchExportResponse:
     result = export_records(body.ids, fmt=body.format)
     return BatchExportResponse.model_validate(result)
+
+
+@router.post("/records/batch-sync-notion", response_model=NotionSyncResponse)
+def batch_sync_notion(body: NotionSyncRequest) -> NotionSyncResponse:
+    if not settings_store.notion_configured():
+        raise HTTPException(
+            status_code=400,
+            detail="Notion 未配置，请前往设置页填写 Integration Token 与父页面 ID",
+        )
+    result = batch_sync_records(body.ids)
+    return NotionSyncResponse(
+        ok=not result["failed"] or bool(result["synced"]),
+        synced=[NotionSyncItem.model_validate(x) for x in result["synced"]],
+        failed=[NotionSyncFailedItem.model_validate(x) for x in result["failed"]],
+    )
 
 
 def _api_self_check() -> None:
