@@ -6,12 +6,17 @@
           'tree-folder',
           {
             active: activeFolderId === ALL_FOLDER_ID,
+            'drop-target': dropTargetId === ALL_FOLDER_ID,
           },
         ]"
         draggable="true"
         @click="$emit('select-folder', ALL_FOLDER_ID)"
         @dragstart="onAllDragStart"
         @dragend="onAllDragEnd"
+        @dragover.prevent="onAllDragOver"
+        @dragenter.prevent="onAllDragOver"
+        @dragleave="onAllDragLeave"
+        @drop.prevent="onAllDrop"
       >
         <button
           type="button"
@@ -87,6 +92,7 @@
             :expanded-ids="expandedIds"
             :selected-ids="selectedIds"
             :dragging-record-ids="draggingRecordIds"
+            :dragging-folder-id="draggingFolderId"
             :drop-target-id="dropTargetId"
             :active-record-id="activeRecordId"
             :active-folder-id="activeFolderId"
@@ -98,6 +104,7 @@
             @remove-record="$emit('remove-record', $event)"
             @record-drag-start="$emit('record-drag-start', $event)"
             @record-drag-end="$emit('record-drag-end', $event)"
+            @folder-drag-start="$emit('folder-drag-start', $event)"
             @folder-drag-over="$emit('folder-drag-over', $event)"
             @folder-drag-leave="$emit('folder-drag-leave', $event)"
             @folder-drop="$emit('folder-drop', $event)"
@@ -117,6 +124,8 @@ import {
   ALL_FOLDER_NAME,
   DRAG_FOLDER_MIME,
   UNCATEGORIZED_FOLDER_ID,
+  isFolderMoveDrag,
+  isFolderRefDrag,
 } from './dragMime.js';
 
 export default {
@@ -130,6 +139,7 @@ export default {
     expandedIds: { type: Object, required: true },
     selectedIds: { type: Array, default: () => [] },
     draggingRecordIds: { type: Array, default: () => [] },
+    draggingFolderId: { type: String, default: null },
     dropTargetId: { type: String, default: null },
     activeRecordId: { type: String, default: '' },
     activeFolderId: { type: String, default: null },
@@ -143,6 +153,7 @@ export default {
     'remove-record',
     'record-drag-start',
     'record-drag-end',
+    'folder-drag-start',
     'folder-drag-over',
     'folder-drag-leave',
     'folder-drop',
@@ -157,7 +168,19 @@ export default {
   },
   methods: {
     isRefDrag(event) {
-      return event.dataTransfer?.effectAllowed === 'copy';
+      return isFolderRefDrag(event);
+    },
+    onAllDragOver(event) {
+      if (!isFolderMoveDrag(event)) return;
+      this.$emit('folder-drag-over', ALL_FOLDER_ID);
+    },
+    onAllDragLeave(event) {
+      if (event.currentTarget.contains(event.relatedTarget)) return;
+      this.$emit('folder-drag-leave', ALL_FOLDER_ID);
+    },
+    onAllDrop(event) {
+      if (!isFolderMoveDrag(event)) return;
+      this.$emit('folder-drop', ALL_FOLDER_ID);
     },
     folderRefPayload(folderId, name, recordIds) {
       return {
@@ -208,7 +231,7 @@ export default {
       this.$emit('record-drag-end');
     },
     onUncatDragOver(event) {
-      if (this.isRefDrag(event)) return;
+      if (this.isRefDrag(event) || isFolderMoveDrag(event)) return;
       this.$emit('folder-drag-over', UNCATEGORIZED_FOLDER_ID);
     },
     onUncatDragLeave(event) {
@@ -216,7 +239,7 @@ export default {
       this.$emit('folder-drag-leave', UNCATEGORIZED_FOLDER_ID);
     },
     onUncatDrop(event) {
-      if (this.isRefDrag(event)) return;
+      if (this.isRefDrag(event) || isFolderMoveDrag(event)) return;
       this.$emit('folder-drop', UNCATEGORIZED_FOLDER_ID);
     },
   },

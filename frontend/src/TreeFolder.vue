@@ -6,6 +6,7 @@
         {
           active: activeFolderId === folder.id,
           'drop-target': dropTargetId === folder.id,
+          dragging: draggingFolderId === folder.id,
         },
       ]"
       :style="{ paddingLeft: `${8 + depth * 14}px` }"
@@ -43,6 +44,7 @@
           :expanded-ids="expandedIds"
           :selected-ids="selectedIds"
           :dragging-record-ids="draggingRecordIds"
+          :dragging-folder-id="draggingFolderId"
           :drop-target-id="dropTargetId"
           :active-record-id="activeRecordId"
           :active-folder-id="activeFolderId"
@@ -54,6 +56,7 @@
           @remove-record="$emit('remove-record', $event)"
           @record-drag-start="$emit('record-drag-start', $event)"
           @record-drag-end="$emit('record-drag-end', $event)"
+          @folder-drag-start="$emit('folder-drag-start', $event)"
           @folder-drag-over="$emit('folder-drag-over', $event)"
           @folder-drag-leave="$emit('folder-drag-leave', $event)"
           @folder-drop="$emit('folder-drop', $event)"
@@ -76,7 +79,7 @@
         />
       </li>
       <li v-if="!(folder.records || []).length && !(folder.children || []).length" class="tree-empty">
-        空文件夹 · 可拖入笔记
+        空文件夹 · 可拖入笔记或子文件夹
       </li>
     </ul>
   </div>
@@ -84,7 +87,7 @@
 
 <script>
 import TreeRecord from './TreeRecord.vue';
-import { DRAG_FOLDER_MIME } from './dragMime.js';
+import { DRAG_FOLDER_MOVE_MIME, isFolderRefDrag } from './dragMime.js';
 
 export default {
   name: 'TreeFolder',
@@ -95,6 +98,7 @@ export default {
     expandedIds: { type: Object, required: true },
     selectedIds: { type: Array, default: () => [] },
     draggingRecordIds: { type: Array, default: () => [] },
+    draggingFolderId: { type: String, default: null },
     dropTargetId: { type: String, default: null },
     activeRecordId: { type: String, default: '' },
     activeFolderId: { type: String, default: null },
@@ -108,6 +112,7 @@ export default {
     'remove-record',
     'record-drag-start',
     'record-drag-end',
+    'folder-drag-start',
     'folder-drag-over',
     'folder-drag-leave',
     'folder-drop',
@@ -133,47 +138,29 @@ export default {
     onAction(action) {
       this.$emit('folder-action', { action, folder: this.folder });
     },
-    collectRecordIds(node) {
-      const ids = (node.records || []).map((r) => r.id);
-      for (const child of node.children || []) {
-        ids.push(...this.collectRecordIds(child));
-      }
-      return ids;
-    },
     onDragStart(event) {
       if (event.target.closest('.tree-toggle, .tree-folder-actions, .tree-mini')) {
         event.preventDefault();
         return;
       }
-      const recordIds = this.collectRecordIds(this.folder);
-      if (!recordIds.length) {
-        event.preventDefault();
-        this.$emit('folder-ref-drag-empty');
-        return;
-      }
       const payload = {
         folder_id: this.folder.id,
         name: this.folder.name,
-        record_ids: recordIds,
-        record_count: recordIds.length,
       };
-      event.dataTransfer.effectAllowed = 'copy';
-      event.dataTransfer.setData(DRAG_FOLDER_MIME, JSON.stringify(payload));
-      event.dataTransfer.setData('text/plain', `${this.folder.name} · ${recordIds.length} 条笔记`);
-      this.$emit('record-drag-start', { purpose: 'folder-ref' });
+      event.dataTransfer.effectAllowed = 'move';
+      event.dataTransfer.setData(DRAG_FOLDER_MOVE_MIME, JSON.stringify(payload));
+      event.dataTransfer.setData('text/plain', this.folder.name);
+      this.$emit('folder-drag-start', { folderId: this.folder.id });
     },
     onDragEnd() {
       this.$emit('record-drag-end');
     },
-    isRefDrag(event) {
-      return event.dataTransfer?.effectAllowed === 'copy';
-    },
     onDragOver(event) {
-      if (this.isRefDrag(event)) return;
+      if (isFolderRefDrag(event)) return;
       this.$emit('folder-drag-over', this.folder.id);
     },
     onDragEnter(event) {
-      if (this.isRefDrag(event)) return;
+      if (isFolderRefDrag(event)) return;
       this.$emit('folder-drag-over', this.folder.id);
     },
     onDragLeave(event) {
@@ -181,7 +168,7 @@ export default {
       this.$emit('folder-drag-leave', this.folder.id);
     },
     onDrop(event) {
-      if (this.isRefDrag(event)) return;
+      if (isFolderRefDrag(event)) return;
       this.$emit('folder-drop', this.folder.id);
     },
   },
@@ -225,6 +212,9 @@ export default {
   background: rgba(59, 91, 219, 0.22);
   border-color: #3b5bdb;
   box-shadow: inset 0 0 0 1px rgba(59, 91, 219, 0.35);
+}
+.tree-folder.dragging {
+  opacity: 0.45;
 }
 .tree-toggle {
   width: 20px;

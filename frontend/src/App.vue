@@ -19,7 +19,7 @@
         </div>
       </div>
 
-      <p class="save-hint">新提取默认保存到「未分类」，可拖拽或批量移动到文件夹</p>
+      <p class="save-hint">新提取默认保存到「未分类」；笔记与文件夹均可拖拽整理</p>
       <p v-if="libraryTip" class="library-tip">{{ libraryTip }}</p>
       <div v-if="allRecordIds.length" class="batch-bar">
         <label class="check">
@@ -80,6 +80,7 @@
           :expanded-ids="expandedIds"
           :selected-ids="selectedIds"
           :dragging-record-ids="draggingRecordIds"
+          :dragging-folder-id="draggingFolderId"
           :drop-target-id="dropTargetFolderId"
           :active-record-id="result?.record_id || ''"
           :active-folder-id="activeFolderId"
@@ -91,6 +92,7 @@
           @remove-record="removeRecord"
           @record-drag-start="onRecordDragStart"
           @record-drag-end="onRecordDragEnd"
+          @folder-drag-start="onFolderDragStart"
           @folder-drag-over="onFolderDragOver"
           @folder-drag-leave="onFolderDragLeave"
           @folder-drop="onFolderDrop"
@@ -247,6 +249,16 @@
       :all-folders="allFolders"
       @open-record="openRecord"
     />
+
+    <CreateFolderDialog
+      :visible="createFolderDialog.visible"
+      :folders="tree.folders"
+      :initial-parent-id="createFolderDialog.parentId"
+      :submitting="createFolderDialog.submitting"
+      :external-error="createFolderDialog.error"
+      @close="closeCreateFolderDialog"
+      @submit="submitCreateFolder"
+    />
     </div>
     </div>
   </div>
@@ -256,11 +268,14 @@
 import SettingsPage from './SettingsPage.vue';
 import LibraryTree from './LibraryTree.vue';
 import ChatPanel from './ChatPanel.vue';
-import { ALL_FOLDER_ID } from './dragMime.js';
+import CreateFolderDialog from './CreateFolderDialog.vue';
+import { ALL_FOLDER_ID, UNCATEGORIZED_FOLDER_ID } from './dragMime.js';
+
+const EXPANDED_IDS_STORAGE_KEY = 'b-subtitle-expanded-folder-ids';
 
 export default {
   name: 'App',
-  components: { SettingsPage, LibraryTree, ChatPanel },
+  components: { SettingsPage, LibraryTree, ChatPanel, CreateFolderDialog },
   data() {
     return {
       view: 'main',
@@ -270,7 +285,8 @@ export default {
       error: '',
       result: null,
       tree: { folders: [], uncategorized: [], total_count: 0 },
-      expandedIds: new Set([ALL_FOLDER_ID, '__uncategorized__']),
+      expandedIds: new Set([ALL_FOLDER_ID, UNCATEGORIZED_FOLDER_ID]),
+      expandStateFromStorage: false,
       activeFolderId: null,
       selectedIds: [],
       copied: false,
@@ -281,10 +297,17 @@ export default {
       resizingSidebar: false,
       resizingChat: false,
       draggingRecordIds: [],
+      draggingFolderId: null,
       dragPurpose: null,
       dropTargetFolderId: null,
       marquee: { active: false, startX: 0, startY: 0, x: 0, y: 0, w: 0, h: 0 },
       libraryTip: '',
+      createFolderDialog: {
+        visible: false,
+        parentId: null,
+        submitting: false,
+        error: '',
+      },
     };
   },
   computed: {
@@ -406,7 +429,13 @@ export default {
       return out;
     },
   },
+  watch: {
+    expandedIds() {
+      this.saveExpandedIds();
+    },
+  },
   mounted() {
+    this.restoreExpandedIds();
     this.loadSidebarWidth();
     this.loadChatWidth();
     this.loadTree();
@@ -476,6 +505,45 @@ export default {
       } catch {
         /* ponytail: localStorage 不可用时用默认宽度 */
       }
+    },
+    restoreExpandedIds() {
+      try {
+        const raw = localStorage.getItem(EXPANDED_IDS_STORAGE_KEY);
+        if (!raw) return;
+        const arr = JSON.parse(raw);
+        if (!Array.isArray(arr) || !arr.length) return;
+        this.expandedIds = new Set(arr.filter((id) => typeof id === 'string' && id));
+        this.expandStateFromStorage = true;
+      } catch {
+        /* ponytail: 解析失败时回退默认展开策略 */
+      }
+    },
+    saveExpandedIds() {
+      try {
+        localStorage.setItem(EXPANDED_IDS_STORAGE_KEY, JSON.stringify([...this.expandedIds]));
+        this.expandStateFromStorage = true;
+      } catch {
+        /* ignore */
+      }
+    },
+    collectKnownFolderIds() {
+      const ids = new Set([ALL_FOLDER_ID, UNCATEGORIZED_FOLDER_ID]);
+      const walk = (folders) => {
+        for (const f of folders || []) {
+          if (f.id) ids.add(f.id);
+          walk(f.children);
+        }
+      };
+      walk(this.tree.folders);
+      return ids;
+    },
+    sanitizeExpandedIds() {
+      const valid = this.collectKnownFolderIds();
+      const next = new Set();
+      for (const id of this.expandedIds) {
+        if (valid.has(id)) next.add(id);
+      }
+      this.expandedIds = next;
     },
     startChatResize(event) {
       if (window.matchMedia('(max-width: 860px)').matches) return;
@@ -595,8 +663,13 @@ export default {
       this.draggingRecordIds = ids;
       this.dragPurpose = purpose;
     },
+    onFolderDragStart({ folderId }) {
+      this.draggingFolderId = folderId;
+      this.dragPurpose = 'folder-move';
+    },
     onRecordDragEnd() {
       this.draggingRecordIds = [];
+      this.draggingFolderId = null;
       this.dropTargetFolderId = null;
       this.dragPurpose = null;
     },
@@ -610,9 +683,33 @@ export default {
     onFolderRefDragEmpty() {
       this.showLibraryTip('文件夹为空');
     },
+    collectDescendantFolderIds(folderId) {
+      const folder = this.findFolder(this.tree.folders, folderId);
+      if (!folder) return new Set();
+      const ids = new Set();
+      const walk = (node) => {
+        for (const child of node.children || []) {
+          ids.add(child.id);
+          walk(child);
+        }
+      };
+      walk(folder);
+      return ids;
+    },
+    canDropFolderOn(folderId) {
+      const src = this.draggingFolderId;
+      if (!src || this.dragPurpose !== 'folder-move') return false;
+      if (folderId === UNCATEGORIZED_FOLDER_ID) return false;
+      if (folderId === src) return false;
+      if (folderId && folderId !== ALL_FOLDER_ID && this.collectDescendantFolderIds(src).has(folderId)) {
+        return false;
+      }
+      return true;
+    },
     onFolderDragOver(folderId) {
+      if (this.dragPurpose === 'folder-move' && !this.canDropFolderOn(folderId)) return;
       this.dropTargetFolderId = folderId;
-      if (folderId && folderId !== '__uncategorized__' && !this.expandedIds.has(folderId)) {
+      if (folderId && folderId !== UNCATEGORIZED_FOLDER_ID && !this.expandedIds.has(folderId)) {
         const next = new Set(this.expandedIds);
         next.add(folderId);
         this.expandedIds = next;
@@ -625,14 +722,51 @@ export default {
     },
     async onFolderDrop(folderId) {
       if (this.dragPurpose === 'ref' || this.dragPurpose === 'folder-ref') return;
+      if (this.dragPurpose === 'folder-move') {
+        const src = this.draggingFolderId;
+        if (!src || !this.canDropFolderOn(folderId)) {
+          this.onRecordDragEnd();
+          return;
+        }
+        const parentId = folderId === ALL_FOLDER_ID ? null : folderId;
+        await this.moveFolderToParent(src, parentId);
+        this.onRecordDragEnd();
+        return;
+      }
       if (folderId === ALL_FOLDER_ID) {
         this.onRecordDragEnd();
         return;
       }
       const ids = this.draggingRecordIds.length ? this.draggingRecordIds : [...this.selectedIds];
-      const targetId = folderId === '__uncategorized__' ? null : folderId;
+      const targetId = folderId === UNCATEGORIZED_FOLDER_ID ? null : folderId;
       await this.moveRecordsToFolder(ids, targetId);
       this.onRecordDragEnd();
+    },
+    async moveFolderToParent(folderId, parentId) {
+      try {
+        const resp = await fetch(`/api/v1/subtitle/folders/${folderId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ parent_id: parentId }),
+        });
+        const data = await resp.json();
+        if (!resp.ok) {
+          this.error = data.detail || '移动文件夹失败';
+          return;
+        }
+        const next = new Set(this.expandedIds);
+        next.add(ALL_FOLDER_ID);
+        if (parentId) next.add(parentId);
+        this.expandedIds = next;
+        this.activeFolderId = folderId;
+        await this.loadTree();
+        this.savedTip = parentId ? '已移动文件夹' : '已移到根目录';
+        setTimeout(() => {
+          if (this.savedTip === '已移动文件夹' || this.savedTip === '已移到根目录') this.savedTip = '';
+        }, 2000);
+      } catch (e) {
+        this.error = String(e);
+      }
     },
     async moveRecordsToFolder(ids, folderId) {
       if (!ids.length) return;
@@ -649,7 +783,7 @@ export default {
         }
         const next = new Set(this.expandedIds);
         if (folderId) next.add(folderId);
-        else next.add('__uncategorized__');
+        else next.add(UNCATEGORIZED_FOLDER_ID);
         this.expandedIds = next;
         this.activeFolderId = folderId;
         await this.loadTree();
@@ -685,7 +819,11 @@ export default {
         this.tree = resp.ok
           ? await resp.json()
           : { folders: [], uncategorized: [], total_count: 0 };
-        this.autoExpandFoldersWithRecords();
+        if (this.expandStateFromStorage) {
+          this.sanitizeExpandedIds();
+        } else {
+          this.autoExpandFoldersWithRecords();
+        }
         this.selectedIds = this.selectedIds.filter((id) => this.allRecordIds.includes(id));
       } catch {
         this.tree = { folders: [], uncategorized: [], total_count: 0 };
@@ -700,7 +838,7 @@ export default {
     autoExpandFoldersWithRecords() {
       const next = new Set(this.expandedIds);
       next.add(ALL_FOLDER_ID);
-      next.add('__uncategorized__');
+      next.add(UNCATEGORIZED_FOLDER_ID);
       const walk = (folders) => {
         for (const f of folders || []) {
           if (this.folderRecordCount(f) > 0) next.add(f.id);
@@ -719,27 +857,43 @@ export default {
     selectFolder(folderId) {
       this.activeFolderId = folderId;
     },
-    async createFolder(parentId) {
-      const name = window.prompt('文件夹名称');
-      if (!name || !name.trim()) return;
+    createFolder(parentId) {
+      this.createFolderDialog.parentId = parentId;
+      this.createFolderDialog.error = '';
+      this.createFolderDialog.visible = true;
+    },
+    closeCreateFolderDialog() {
+      if (this.createFolderDialog.submitting) return;
+      this.createFolderDialog.visible = false;
+      this.createFolderDialog.error = '';
+    },
+    async submitCreateFolder({ name, parentId }) {
+      if (this.createFolderDialog.submitting) return;
+      this.createFolderDialog.submitting = true;
+      this.createFolderDialog.error = '';
+      this.error = '';
       try {
         const resp = await fetch('/api/v1/subtitle/folders', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name: name.trim(), parent_id: parentId }),
+          body: JSON.stringify({ name, parent_id: parentId }),
         });
         const data = await resp.json();
         if (!resp.ok) {
-          this.error = data.detail || '创建失败';
+          this.createFolderDialog.error = data.detail || '创建失败';
           return;
         }
         const next = new Set(this.expandedIds);
         if (parentId) next.add(parentId);
+        next.add(ALL_FOLDER_ID);
         this.expandedIds = next;
         this.activeFolderId = data.id;
+        this.createFolderDialog.visible = false;
         await this.loadTree();
       } catch (e) {
-        this.error = String(e);
+        this.createFolderDialog.error = String(e);
+      } finally {
+        this.createFolderDialog.submitting = false;
       }
     },
     async onFolderAction({ action, folder }) {
