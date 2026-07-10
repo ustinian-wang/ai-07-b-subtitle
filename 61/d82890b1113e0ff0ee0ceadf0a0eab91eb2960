@@ -1,0 +1,61 @@
+frontend/src/App.vue
+  s_132439e084ecda::t_8e1604d4766488 276
+  s_132439e084ecda::t_deda3d6f2421c5 415
+  s_132439e084ecda::t_8d4909f8511d84 669-674
+  s_132439e084ecda::t_9e9c07c273acf6 518-520,525,528
+  s_132439e084ecda::t_aa437acde13c67 272,274-275,278,280
+  s_132439e084ecda::t_297c12445a5d58 517,524
+  s_132439e084ecda::t_930688c1a45145 786
+  s_132439e084ecda::t_a8fabb8a350555 881
+  s_132439e084ecda::t_84c2fbfdcbbde4 273,277,279
+frontend/tests/CreateFolderDialog.test.js
+  s_132439e084ecda::t_b030ea86a71905 1-5,8-11,13-19,21-23,25,27-36,38-47,49-51,53,55-68,70-76,78-82
+  s_132439e084ecda::t_b3071c4b94003c 48,54
+  s_132439e084ecda::t_941c42a6322a79 6-7,12,24,37,52,69,77
+  s_132439e084ecda::t_7af2ecf7b8e1f8 20,26
+frontend/package.json
+  s_132439e084ecda::t_8458a63e50c3fe 21-24
+  s_132439e084ecda::t_54cd3ae78f80f8 10-12
+frontend/tests/fixtures/libraryTree.js
+  s_132439e084ecda::t_6e24b00829081d 1-52
+frontend/tests/helpers/dragEvent.js
+  s_132439e084ecda::t_0e97247b2f899d 21,25-26,29-30
+  s_132439e084ecda::t_4df0ec0deff6cb 1-20,22-24,27-28,31-70
+frontend/tests/dragMime.test.js
+  s_132439e084ecda::t_930a6d4c972adf 1-27
+frontend/vitest.config.js
+  s_132439e084ecda::t_f01f6908835558 1-11
+frontend/tests/libraryHelpers.test.js
+  s_132439e084ecda::t_87111b9a810842 1-121
+frontend/tests/TreeFolder.test.js
+  s_132439e084ecda::t_156f2c45a2d8b0 11,38-44,69,75,81,87,97
+  s_132439e084ecda::t_ae15b8135bc9c6 1-10,12-37,45-68,70-74,76-80,82-86,88-96,98-101
+frontend/tests/LibraryTree.test.js
+  s_132439e084ecda::t_1b7e6accbb5bb1 1-4,7-34,39-49,51-67,69-72,74-75,77-82,84-86,88-104,106-108,110-115,117-121,123-131,133-135
+  s_132439e084ecda::t_4697d2213cca84 5-6,35-38,50,68,73,83,87,105,109,116,122,132
+  s_132439e084ecda::t_da5d5c584948b1 76
+frontend/src/libraryHelpers.js
+  s_132439e084ecda::t_755993c9074357 1-127
+frontend/tests/TreeRecord.test.js
+  s_132439e084ecda::t_ce61662dd220ca 30,32,46,48,54,57
+  s_132439e084ecda::t_86b280c3895ac6 1-29,31,33-45,47,49-50,52,58-62
+  s_132439e084ecda::t_437f18c3efd1c7 51,53,55-56
+frontend/package-lock.json
+  s_132439e084ecda::t_33f29652767666 17-34,83-197,589-606,613-630,1002-1124,1225-1244,1246-1251,1253-1273,1276,1279-1282,1288-1289,1292-1295,1299,1302-1320,1323,1326-2074,2083-2148,2167-2266,2299-2563,2566,2569-2633,2637,2640-2657,2660,2663-2671,2673,2736-2824,2845-3082
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "61d82890b1113e0ff0ee0ceadf0a0eab91eb2960",
+  "prompts": {},
+  "sessions": {
+    "s_132439e084ecda": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "c97798b5-d8a1-44f3-b960-6b27b2556921",
+        "model": "default"
+      },
+      "human_author": "jser <87244899@qq.com>"
+    }
+  }
+}
