@@ -1,0 +1,35 @@
+docs/api.md
+  s_132439e084ecda::t_ad149f13ef6aef 1-125
+docs/development.md
+  s_132439e084ecda::t_bcb626847c6976 1-96
+  s_132439e084ecda::t_e98cb372ceb15b 97
+backend/.env.example
+  s_132439e084ecda::t_48a77fd01e3536 16
+docs/configuration.md
+  s_132439e084ecda::t_2f7f27a9b0f548 56
+  s_132439e084ecda::t_345a52108ee07c 1-55,57-86
+README.md
+  s_132439e084ecda::t_b22e64d90449c4 3,5,7,9,11-12,14,19-20,22-23,26-27,30,32,34-35,37,39-41,43-45,48,50,52-57,59,61,63-68,71,73-78,80,82-85,88,90-95
+  s_132439e084ecda::t_70988fa299eb3b 86
+  s_132439e084ecda::t_472fcb95fb7270 17
+  s_132439e084ecda::t_1cc23794929e5c 69
+docs/user-guide.md
+  s_132439e084ecda::t_2e1bed2333e624 1-98,100,102,104-118
+  s_132439e084ecda::t_f1ec06519eeabd 99,101,103
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "efcda51764e1e0cc24bf395d5ce6a6d843d448aa",
+  "prompts": {},
+  "sessions": {
+    "s_132439e084ecda": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "c97798b5-d8a1-44f3-b960-6b27b2556921",
+        "model": "default"
+      },
+      "human_author": "jser <87244899@qq.com>"
+    }
+  }
+}
