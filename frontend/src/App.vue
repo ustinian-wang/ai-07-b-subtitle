@@ -269,9 +269,16 @@ import SettingsPage from './SettingsPage.vue';
 import LibraryTree from './LibraryTree.vue';
 import ChatPanel from './ChatPanel.vue';
 import CreateFolderDialog from './CreateFolderDialog.vue';
+import {
+  autoExpandFoldersWithRecords as buildAutoExpandedIds,
+  canDropFolderOn,
+  flattenFolderOptions,
+  folderRecordCount,
+  restoreExpandedIds as readExpandedIds,
+  sanitizeExpandedIds,
+  saveExpandedIds as persistExpandedIds,
+} from './libraryHelpers.js';
 import { ALL_FOLDER_ID, UNCATEGORIZED_FOLDER_ID } from './dragMime.js';
-
-const EXPANDED_IDS_STORAGE_KEY = 'b-subtitle-expanded-folder-ids';
 
 export default {
   name: 'App',
@@ -405,7 +412,7 @@ export default {
             type: 'folder',
             folderId: f.id,
             name: f.name,
-            recordCount: this.folderRecordCount(f),
+            recordCount: folderRecordCount(f),
             path: label,
           });
           walk(f.children, label);
@@ -507,43 +514,18 @@ export default {
       }
     },
     restoreExpandedIds() {
-      try {
-        const raw = localStorage.getItem(EXPANDED_IDS_STORAGE_KEY);
-        if (!raw) return;
-        const arr = JSON.parse(raw);
-        if (!Array.isArray(arr) || !arr.length) return;
-        this.expandedIds = new Set(arr.filter((id) => typeof id === 'string' && id));
-        this.expandStateFromStorage = true;
-      } catch {
-        /* ponytail: 解析失败时回退默认展开策略 */
+      const { expandedIds, fromStorage } = readExpandedIds(localStorage);
+      if (expandedIds) {
+        this.expandedIds = expandedIds;
+        this.expandStateFromStorage = fromStorage;
       }
     },
     saveExpandedIds() {
-      try {
-        localStorage.setItem(EXPANDED_IDS_STORAGE_KEY, JSON.stringify([...this.expandedIds]));
-        this.expandStateFromStorage = true;
-      } catch {
-        /* ignore */
-      }
-    },
-    collectKnownFolderIds() {
-      const ids = new Set([ALL_FOLDER_ID, UNCATEGORIZED_FOLDER_ID]);
-      const walk = (folders) => {
-        for (const f of folders || []) {
-          if (f.id) ids.add(f.id);
-          walk(f.children);
-        }
-      };
-      walk(this.tree.folders);
-      return ids;
+      persistExpandedIds(this.expandedIds, localStorage);
+      this.expandStateFromStorage = true;
     },
     sanitizeExpandedIds() {
-      const valid = this.collectKnownFolderIds();
-      const next = new Set();
-      for (const id of this.expandedIds) {
-        if (valid.has(id)) next.add(id);
-      }
-      this.expandedIds = next;
+      this.expandedIds = sanitizeExpandedIds(this.expandedIds, this.tree.folders);
     },
     startChatResize(event) {
       if (window.matchMedia('(max-width: 860px)').matches) return;
@@ -683,28 +665,13 @@ export default {
     onFolderRefDragEmpty() {
       this.showLibraryTip('文件夹为空');
     },
-    collectDescendantFolderIds(folderId) {
-      const folder = this.findFolder(this.tree.folders, folderId);
-      if (!folder) return new Set();
-      const ids = new Set();
-      const walk = (node) => {
-        for (const child of node.children || []) {
-          ids.add(child.id);
-          walk(child);
-        }
-      };
-      walk(folder);
-      return ids;
-    },
     canDropFolderOn(folderId) {
-      const src = this.draggingFolderId;
-      if (!src || this.dragPurpose !== 'folder-move') return false;
-      if (folderId === UNCATEGORIZED_FOLDER_ID) return false;
-      if (folderId === src) return false;
-      if (folderId && folderId !== ALL_FOLDER_ID && this.collectDescendantFolderIds(src).has(folderId)) {
-        return false;
-      }
-      return true;
+      return canDropFolderOn({
+        folderId,
+        draggingFolderId: this.draggingFolderId,
+        dragPurpose: this.dragPurpose,
+        folders: this.tree.folders,
+      });
     },
     onFolderDragOver(folderId) {
       if (this.dragPurpose === 'folder-move' && !this.canDropFolderOn(folderId)) return;
@@ -798,21 +765,6 @@ export default {
         this.error = String(e);
       }
     },
-    findFolder(folders, id) {
-      for (const f of folders || []) {
-        if (f.id === id) return f;
-        const child = this.findFolder(f.children, id);
-        if (child) return child;
-      }
-      return null;
-    },
-    flattenFolderOptions(folders, depth = 0, out = []) {
-      for (const f of folders || []) {
-        out.push({ id: f.id, label: `${'　'.repeat(depth)}📂 ${f.name}` });
-        this.flattenFolderOptions(f.children, depth + 1, out);
-      }
-      return out;
-    },
     async loadTree() {
       try {
         const resp = await fetch('/api/v1/subtitle/tree');
@@ -830,23 +782,8 @@ export default {
         this.selectedIds = [];
       }
     },
-    folderRecordCount(folder) {
-      let n = (folder.records || []).length;
-      for (const c of folder.children || []) n += this.folderRecordCount(c);
-      return n;
-    },
     autoExpandFoldersWithRecords() {
-      const next = new Set(this.expandedIds);
-      next.add(ALL_FOLDER_ID);
-      next.add(UNCATEGORIZED_FOLDER_ID);
-      const walk = (folders) => {
-        for (const f of folders || []) {
-          if (this.folderRecordCount(f) > 0) next.add(f.id);
-          walk(f.children);
-        }
-      };
-      walk(this.tree.folders);
-      this.expandedIds = next;
+      this.expandedIds = buildAutoExpandedIds(this.expandedIds, this.tree.folders);
     },
     toggleExpand(id) {
       const next = new Set(this.expandedIds);
@@ -941,7 +878,7 @@ export default {
     },
     async batchMove() {
       if (!this.selectedIds.length) return;
-      const options = [{ id: '', label: '📁 未分类' }, ...this.flattenFolderOptions(this.tree.folders)];
+      const options = [{ id: '', label: '📁 未分类' }, ...flattenFolderOptions(this.tree.folders)];
       const msg = options.map((o, i) => `${i}. ${o.label}`).join('\n');
       const input = window.prompt(`移动到（输入序号）:\n${msg}`, '0');
       if (input === null) return;
